@@ -17,10 +17,10 @@ def get_photo_exif(logger: logging.Logger, path: str) -> str | None:
         return None
 
 
-def set_photo_exif(logger: logging.Logger, path: str, date: str | None, rating: int | None = None) -> None:
+def set_photo_exif(logger: logging.Logger, path: str, date: str | None, rating: int | None) -> None:
     """Set EXIF date and rating on a photo, do nothing if there is an error"""
     # Early return if nothing to set
-    if date is None and (rating is None or rating == 0):
+    if date is None and rating is None:
         return
     
     try:
@@ -33,7 +33,7 @@ def set_photo_exif(logger: logging.Logger, path: str, date: str | None, rating: 
             exif_dict.get("Exif")[36868] = date
         
         # Set rating if provided
-        if rating is not None and rating > 0:
+        if rating is not None:
             # Windows-compatible Rating tag (0x4746 = 18246)
             if "0th" not in exif_dict:
                 exif_dict["0th"] = {}

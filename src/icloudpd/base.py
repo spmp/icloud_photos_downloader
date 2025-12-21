@@ -766,7 +766,8 @@ def download_builder(
 
                         is_favorite = photo._asset_record["fields"].get("isFavorite", {}).get("value") == 1
                         needs_datetime = not dry_run and set_exif_datetime and not exif_datetime.get_photo_exif(logger, download_path)
-                        needs_rating = not dry_run and favorite_to_rating > 0 and is_favorite
+                        # Write favorite status to rating EXIF field only if favorite. Consider changing this to always give a rating.
+                        needs_rating = not dry_run and favorite_to_rating and is_favorite
 
                         if not dry_run and is_jpeg(filename) and (needs_datetime or needs_rating):
                             datetime_str = created_date.strftime("%Y:%m:%d %H:%M:%S") if needs_datetime else None

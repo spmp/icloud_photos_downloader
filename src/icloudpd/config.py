@@ -28,7 +28,7 @@ class _DefaultConfig:
     skip_videos: bool
     skip_live_photos: bool
     xmp_sidecar: bool
-    favorite_to_rating: int
+    favorite_to_rating: int | None
     force_size: bool
     auto_delete: bool
     folder_structure: str

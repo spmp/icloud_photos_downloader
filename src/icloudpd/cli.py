@@ -125,7 +125,7 @@ def add_options_for_user(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
         help="Set EXIF (and/or XMP sidecar if enabled) Rating for favorited photos (0-5). Default: %(const)s if no value specified",
         nargs='?',
         const=5,
-        default=0,
+        default=None,
         type=int,
         choices=[0, 1, 2, 3, 4, 5]
     )

@@ -35,7 +35,11 @@ class XMPMetadata(NamedTuple):
 
 
 def generate_xmp_file(
-    logger: logging.Logger, download_path: str, asset_record: dict[str, Any], favorite_to_rating: int, dry_run: bool
+    logger: logging.Logger,
+    download_path: str,
+    asset_record: dict[str, Any],
+    favorite_to_rating: int | None,
+    dry_run: bool
 ) -> None:
     sidecar_path: str = download_path + ".xmp"
     can_write_file: bool = True
@@ -76,7 +80,7 @@ def generate_xmp_file(
                 f.write(ElementTree.tostring(xml_doc, encoding="utf-8", xml_declaration=True))
 
 
-def build_metadata(asset_record: dict[str, Any], favorite_to_rating: int) -> XMPMetadata:
+def build_metadata(asset_record: dict[str, Any], favorite_to_rating: int | None) -> XMPMetadata:
     """Build XMP metadata from asset record"""
 
     title = None
@@ -170,7 +174,11 @@ def build_metadata(asset_record: dict[str, Any], favorite_to_rating: int) -> XMP
         "isFavorite" in asset_record["fields"]
         and asset_record["fields"]["isFavorite"]["value"] == 1
     ):
-        rating = favorite_to_rating
+        # Preserve default behaviour of favorite to rating of 5 even if favorite_to_rating unset
+        if favorite_to_rating:
+            rating = favorite_to_rating
+        else:
+            rating = 5
 
     return XMPMetadata(
         XMPToolkit="icloudpd " + version_info.version + "+" + version_info.commit_sha,
