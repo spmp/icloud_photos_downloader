@@ -35,7 +35,7 @@ class XMPMetadata(NamedTuple):
 
 
 def generate_xmp_file(
-    logger: logging.Logger, download_path: str, asset_record: dict[str, Any], dry_run: bool
+    logger: logging.Logger, download_path: str, asset_record: dict[str, Any], favorite_to_rating: int, dry_run: bool
 ) -> None:
     sidecar_path: str = download_path + ".xmp"
     can_write_file: bool = True
@@ -68,7 +68,7 @@ def generate_xmp_file(
     # json.dump(asset_record["fields"],         open(download_path + ".ar.json", "w"),         indent=4,        default=str,        sort_keys=True)
 
     if can_write_file:
-        xmp_metadata: XMPMetadata = build_metadata(asset_record)
+        xmp_metadata: XMPMetadata = build_metadata(asset_record, favorite_to_rating)
         xml_doc: ElementTree.Element = generate_xml(xmp_metadata)
         if not dry_run:
             # Write the XML to the file
@@ -76,7 +76,7 @@ def generate_xmp_file(
                 f.write(ElementTree.tostring(xml_doc, encoding="utf-8", xml_declaration=True))
 
 
-def build_metadata(asset_record: dict[str, Any]) -> XMPMetadata:
+def build_metadata(asset_record: dict[str, Any], favorite_to_rating: int) -> XMPMetadata:
     """Build XMP metadata from asset record"""
 
     title = None
@@ -170,7 +170,7 @@ def build_metadata(asset_record: dict[str, Any]) -> XMPMetadata:
         "isFavorite" in asset_record["fields"]
         and asset_record["fields"]["isFavorite"]["value"] == 1
     ):
-        rating = 5
+        rating = favorite_to_rating
 
     return XMPMetadata(
         XMPToolkit="icloudpd " + version_info.version + "+" + version_info.commit_sha,

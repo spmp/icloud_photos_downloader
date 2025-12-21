@@ -121,6 +121,15 @@ def add_options_for_user(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
         action="store_true",
     )
     cloned.add_argument(
+        "--favorite-to-rating",
+        help="Set EXIF (and/or XMP sidecar if enabled) Rating for favorited photos (0-5). Default: %(const)s if no value specified",
+        nargs='?',
+        const=5,
+        default=0,
+        type=int,
+        choices=[0, 1, 2, 3, 4, 5]
+    )
+    cloned.add_argument(
         "--force-size",
         help="Only download the requested size (`adjusted` and `alternative` will not be forced). Default: download original if size is not available",
         action="store_true",
@@ -449,6 +458,7 @@ def map_to_config(user_ns: argparse.Namespace) -> UserConfig:
         skip_videos=user_ns.skip_videos,
         skip_live_photos=user_ns.skip_live_photos,
         xmp_sidecar=user_ns.xmp_sidecar,
+        favorite_to_rating=user_ns.favorite_to_rating,
         force_size=user_ns.force_size,
         auto_delete=user_ns.auto_delete,
         folder_structure=user_ns.folder_structure,

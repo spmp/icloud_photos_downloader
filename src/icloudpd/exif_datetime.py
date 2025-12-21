@@ -17,13 +17,28 @@ def get_photo_exif(logger: logging.Logger, path: str) -> str | None:
         return None
 
 
-def set_photo_exif(logger: logging.Logger, path: str, date: str) -> None:
-    """Set EXIF date on a photo, do nothing if there is an error"""
+def set_photo_exif(logger: logging.Logger, path: str, date: str | None, rating: int | None = None) -> None:
+    """Set EXIF date and rating on a photo, do nothing if there is an error"""
+    # Early return if nothing to set
+    if date is None and (rating is None or rating == 0):
+        return
+    
     try:
         exif_dict = piexif.load(path)
-        exif_dict.get("1st")[306] = date
-        exif_dict.get("Exif")[36867] = date
-        exif_dict.get("Exif")[36868] = date
+        
+        # Set date if provided
+        if date is not None:
+            exif_dict.get("1st")[306] = date
+            exif_dict.get("Exif")[36867] = date
+            exif_dict.get("Exif")[36868] = date
+        
+        # Set rating if provided
+        if rating is not None and rating > 0:
+            # Windows-compatible Rating tag (0x4746 = 18246)
+            if "0th" not in exif_dict:
+                exif_dict["0th"] = {}
+            exif_dict["0th"][18246] = rating
+        
         exif_bytes = piexif.dump(exif_dict)
         piexif.insert(exif_bytes, path)
     except (ValueError, InvalidImageDataError):

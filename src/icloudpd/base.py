@@ -437,6 +437,7 @@ def _process_all_users_once(
                     user_config.dry_run,
                     user_config.file_match_policy,
                     user_config.xmp_sidecar,
+                    user_config.favorite_to_rating,
                     lp_filename_generator,
                     filename_builder,
                     user_config.align_raw,
@@ -624,6 +625,7 @@ def download_builder(
     dry_run: bool,
     file_match_policy: FileMatchPolicy,
     xmp_sidecar: bool,
+    favorite_to_rating: int,
     lp_filename_generator: Callable[[str], str],
     filename_builder: Callable[[PhotoAsset], str],
     raw_policy: RawTreatmentPolicy,
@@ -762,22 +764,24 @@ def download_builder(
 
                         is_jpeg = compose(endswith((".jpg", ".jpeg")), lower)
 
-                        if (
-                            not dry_run
-                            and set_exif_datetime
-                            and is_jpeg(filename)
-                            and not exif_datetime.get_photo_exif(logger, download_path)
-                        ):
-                            # %Y:%m:%d looks wrong, but it's the correct format
-                            date_str = created_date.strftime("%Y-%m-%d %H:%M:%S%z")
+                        is_favorite = photo._asset_record["fields"].get("isFavorite", {}).get("value") == 1
+                        needs_datetime = not dry_run and set_exif_datetime and not exif_datetime.get_photo_exif(logger, download_path)
+                        needs_rating = not dry_run and favorite_to_rating > 0 and is_favorite
+
+                        if not dry_run and is_jpeg(filename) and (needs_datetime or needs_rating):
+                            datetime_str = created_date.strftime("%Y:%m:%d %H:%M:%S") if needs_datetime else None
+                            rating_value = favorite_to_rating if needs_rating else None
+                            
                             logger.debug(
-                                "Setting EXIF timestamp for %s: %s", download_path, date_str
+                                "Setting EXIF for %s: datetime=%s, rating=%s",
+                                download_path, datetime_str, rating_value
                             )
-                            exif_datetime.set_photo_exif(
-                                logger,
-                                download_path,
-                                created_date.strftime("%Y:%m:%d %H:%M:%S"),
-                            )
+                            exif_datetime.set_photo_exif(logger, download_path, datetime_str, rating_value)
+
+                        if not dry_run:
+                            download.set_utime(download_path, created_date)
+                        logger.info("Downloaded %s", truncated_path)
+
                         if not dry_run:
                             download.set_utime(download_path, created_date)
                         logger.info("Downloaded %s", truncated_path)
@@ -786,7 +790,7 @@ def download_builder(
                         last_result = download_result
 
         if xmp_sidecar:
-            generate_xmp_file(logger, download_path, photo._asset_record, dry_run)
+            generate_xmp_file(logger, download_path, photo._asset_record, favorite_to_rating, dry_run)
 
     # Also download the live photo if present
     if not skip_live_photos:
