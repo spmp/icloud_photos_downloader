@@ -569,7 +569,10 @@ def parse(args: Sequence[str]) -> Tuple[GlobalConfig, Sequence[UserConfig], Plug
         # Merge plugin_ns into global_ns for passing to plugins later
         for key, value in vars(plugin_ns).items():
             setattr(global_ns, key, value)
-        
+
+        # Store the merged namespace in plugin_manager for later use
+        plugin_manager.set_plugin_config(global_ns)
+
         # Use remaining args for user options
         non_global_args = remaining_args
 
@@ -711,7 +714,7 @@ def cli() -> int:
             enabled_plugins = global_ns.plugins or []
             for plugin_name in enabled_plugins:
                 try:
-                    plugin_manager.enable(plugin_name, global_ns)
+                    plugin_manager.enable(plugin_name)
                 except KeyError as e:
                     print(f"Error: {e}")
                     return 2

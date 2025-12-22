@@ -112,7 +112,7 @@ class TestPluginManager(unittest.TestCase):
             manager.get_plugin_info("nonexistent")
 
     def test_enable_plugin(self):
-        """Test enabling a plugin"""
+        """Test enabling a plugin with explicit config"""
         manager = PluginManager()
         manager.available["mock"] = MockPlugin
 
@@ -123,6 +123,34 @@ class TestPluginManager(unittest.TestCase):
         self.assertIsInstance(manager.enabled["mock"], MockPlugin)
         self.assertTrue(manager.enabled["mock"].configured)
         self.assertEqual(manager.enabled["mock"].mock_option, "test")
+
+    def test_enable_plugin_with_stored_config(self):
+        """Test enabling a plugin using stored config"""
+        manager = PluginManager()
+        manager.available["mock"] = MockPlugin
+
+        # Store config first
+        config = Namespace(mock_option="from_stored")
+        manager.set_plugin_config(config)
+
+        # Enable without passing config explicitly
+        manager.enable("mock")
+
+        self.assertIn("mock", manager.enabled)
+        self.assertIsInstance(manager.enabled["mock"], MockPlugin)
+        self.assertTrue(manager.enabled["mock"].configured)
+        self.assertEqual(manager.enabled["mock"].mock_option, "from_stored")
+
+    def test_enable_plugin_without_config_raises(self):
+        """Test enabling plugin without config raises ValueError"""
+        manager = PluginManager()
+        manager.available["mock"] = MockPlugin
+
+        # Don't set config or pass it
+        with self.assertRaises(ValueError) as ctx:
+            manager.enable("mock")
+
+        self.assertIn("No configuration available", str(ctx.exception))
 
     def test_enable_unknown_plugin(self):
         """Test enabling unknown plugin raises KeyError"""

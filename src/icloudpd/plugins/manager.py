@@ -9,7 +9,7 @@ The PluginManager handles:
 
 import logging
 from importlib.metadata import entry_points
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from argparse import ArgumentParser, Namespace
 
 from icloudpd.plugins.base import IcloudpdPlugin
@@ -32,6 +32,7 @@ class PluginManager:
         """Initialize the plugin manager."""
         self.available: Dict[str, type] = {}  # name -> plugin class
         self.enabled: Dict[str, IcloudpdPlugin] = {}  # name -> plugin instance
+        self.plugin_config: Optional[Namespace] = None  # Stored config with plugin args
     
     def discover(self) -> None:
         """Discover all installed plugins via entry points.
@@ -90,17 +91,29 @@ class PluginManager:
             'description': temp_instance.description,
         }
     
-    def enable(self, name: str, config: Namespace) -> None:
+    def set_plugin_config(self, config: Namespace) -> None:
+        """Store the plugin configuration namespace.
+
+        This should be called with the raw namespace that contains
+        all plugin-specific arguments (after they've been parsed and merged).
+
+        Args:
+            config: Namespace with plugin arguments
+        """
+        self.plugin_config = config
+
+    def enable(self, name: str, config: Optional[Namespace] = None) -> None:
         """Enable and configure a plugin.
-        
+
         Creates an instance of the plugin and calls its configure() method.
-        
+
         Args:
             name: Plugin name to enable
-            config: Parsed CLI arguments
-            
+            config: Parsed CLI arguments (optional, uses stored plugin_config if not provided)
+
         Raises:
             KeyError: If plugin name not found in available plugins
+            ValueError: If no configuration is available
         """
         if name not in self.available:
             available = ', '.join(self.list_available())
@@ -108,17 +121,22 @@ class PluginManager:
                 f"Plugin '{name}' not found. "
                 f"Available plugins: {available if available else 'none'}"
             )
-        
+
+        # Use stored plugin config if not explicitly passed
+        plugin_config = config if config is not None else self.plugin_config
+        if plugin_config is None:
+            raise ValueError(f"No configuration available for plugin {name}")
+
         try:
             plugin_class = self.available[name]
             plugin = plugin_class()
-            
+
             # Configure the plugin with CLI args
-            plugin.configure(config)
-            
+            plugin.configure(plugin_config)
+
             self.enabled[name] = plugin
             logger.info(f"Enabled plugin: {name} (v{plugin.version})")
-            
+
         except Exception as e:
             logger.error(f"Failed to enable plugin {name}: {e}", exc_info=True)
             raise
