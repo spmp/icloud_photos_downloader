@@ -33,7 +33,7 @@ class MockPlugin(IcloudpdPlugin):
         group = parser.add_argument_group("Mock Plugin")
         group.add_argument("--mock-option", help="Mock option")
 
-    def configure(self, config: Namespace) -> None:
+    def configure(self, config: Namespace, global_config=None, user_configs=None) -> None:
         self.configured = True
         self.mock_option = getattr(config, "mock_option", None)
 

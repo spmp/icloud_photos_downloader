@@ -8,11 +8,16 @@ This plugin demonstrates:
 """
 
 from argparse import ArgumentParser, Namespace
-from typing import List, Dict, Any
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from icloudpd.plugins.base import IcloudpdPlugin
 from pyicloud_ipd.services.photos import PhotoAsset
 from pyicloud_ipd.version_size import VersionSize
+
+if TYPE_CHECKING:
+    from typing import Sequence
+
+    from icloudpd.config import GlobalConfig, UserConfig
 
 
 class DemoPlugin(IcloudpdPlugin):
@@ -73,8 +78,19 @@ class DemoPlugin(IcloudpdPlugin):
             help='Show compact one-line output per photo'
         )
     
-    def configure(self, config: Namespace) -> None:
-        """Configure demo plugin from CLI arguments"""
+    def configure(
+        self,
+        config: Namespace,
+        global_config: "GlobalConfig | None" = None,
+        user_configs: "Sequence[UserConfig] | None" = None,
+    ) -> None:
+        """Configure demo plugin from CLI arguments and runtime configs.
+
+        Args:
+            config: Parsed CLI arguments namespace
+            global_config: Global configuration (optional)
+            user_configs: List of user configurations (optional)
+        """
         self.verbose = getattr(config, 'demo_verbose', False)
         self.compact = getattr(config, 'demo_compact', False)
         
@@ -278,7 +294,7 @@ class DemoPlugin(IcloudpdPlugin):
             
             # Photo info
             is_fav = photo._asset_record.get("fields", {}).get("isFavorite", {}).get("value") == 1
-            print(f"\n📋 Photo Information:")
+            print("\n📋 Photo Information:")
             print(f"   ID:         {photo.id}")
             print(f"   Filename:   {photo.filename}")
             print(f"   Favorite:   {'⭐ YES' if is_fav else 'No'}")
@@ -299,13 +315,13 @@ class DemoPlugin(IcloudpdPlugin):
                     print(f"       {file_info['path']}")
             
             # What a real plugin would do
-            print(f"\n💡 What a Real Plugin Would Do Here:")
+            print("\n💡 What a Real Plugin Would Do Here:")
             print(f"   • Upload {len(self.current_photo_files)} file(s) to cloud storage")
             if len(self.current_photo_files) > 1:
                 print(f"   • Stack/group the {len(self.current_photo_files)} variants together")
             if is_fav:
-                print(f"   • Mark as favorite in the service")
-            print(f"   • Add to album based on date or tags")
+                print("   • Mark as favorite in the service")
+            print("   • Add to album based on date or tags")
             print()
         
         # IMPORTANT: Clear accumulator for next photo
@@ -326,18 +342,18 @@ class DemoPlugin(IcloudpdPlugin):
             print("\n" + "=" * 70)
             print("✅ RUN COMPLETED")
             print("=" * 70)
-            print(f"\n📊 Final Statistics:")
+            print("\n📊 Final Statistics:")
             print(f"   Total Photos:         {self.total_photos}")
             print(f"   Files Downloaded:     {self.total_files_downloaded}")
             print(f"   Files Already Existed: {self.total_files_existed}")
             print(f"   Live Photos:          {self.total_files_live}")
             print(f"   Total Files:          {self.total_files_downloaded + self.total_files_existed}")
             
-            print(f"\n💡 What a Real Plugin Would Do:")
-            print(f"   • Upload summary to service dashboard")
-            print(f"   • Send completion notification")
-            print(f"   • Trigger backup or sync processes")
-            print(f"   • Clean up temporary files")
+            print("\n💡 What a Real Plugin Would Do:")
+            print("   • Upload summary to service dashboard")
+            print("   • Send completion notification")
+            print("   • Trigger backup or sync processes")
+            print("   • Clean up temporary files")
             print("=" * 70)
             print()
     

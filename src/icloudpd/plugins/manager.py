@@ -8,11 +8,16 @@ The PluginManager handles:
 """
 
 import logging
-from importlib.metadata import entry_points
-from typing import Any, Dict, List, Optional
 from argparse import ArgumentParser, Namespace
+from importlib.metadata import entry_points
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from icloudpd.plugins.base import IcloudpdPlugin
+
+if TYPE_CHECKING:
+    from typing import Sequence
+
+    from icloudpd.config import GlobalConfig, UserConfig
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +37,9 @@ class PluginManager:
         """Initialize the plugin manager."""
         self.available: Dict[str, type] = {}  # name -> plugin class
         self.enabled: Dict[str, IcloudpdPlugin] = {}  # name -> plugin instance
-        self.plugin_config: Optional[Namespace] = None  # Stored config with plugin args
+        self.plugin_config: Namespace | None = None  # Stored config with plugin args
+        self.global_config: GlobalConfig | None = None  # Global configuration
+        self.user_configs: Sequence[UserConfig] | None = None  # User configurations
     
     def discover(self) -> None:
         """Discover all installed plugins via entry points.
@@ -91,18 +98,42 @@ class PluginManager:
             'description': temp_instance.description,
         }
     
-    def set_plugin_config(self, config: Namespace) -> None:
-        """Store the plugin configuration namespace.
+    def set_plugin_config(
+        self,
+        config: Namespace,
+        global_config: Optional["GlobalConfig"] = None,
+        user_configs: Optional["Sequence[UserConfig]"] = None,
+    ) -> None:
+        """Store the plugin configuration namespace and runtime configs.
 
-        This should be called with the raw namespace that contains
-        all plugin-specific arguments (after they've been parsed and merged).
+        This should be called:
+        1. Early (from cli.py) with just the namespace
+        2. Late (from base.py) with the runtime configs
 
         Args:
             config: Namespace with plugin arguments
+            global_config: Global configuration object (optional)
+            user_configs: List of user configurations (optional)
         """
         self.plugin_config = config
+        if global_config is not None:
+            self.global_config = global_config
+        if user_configs is not None:
+            self.user_configs = user_configs
 
-    def enable(self, name: str, config: Optional[Namespace] = None) -> None:
+        # Re-configure enabled plugins with new configs
+        if (global_config is not None or user_configs is not None) and self.enabled:
+            for plugin_name, plugin in self.enabled.items():
+                try:
+                    logger.debug(f"Re-configuring plugin {plugin_name} with runtime configs")
+                    plugin.configure(self.plugin_config, self.global_config, self.user_configs)
+                except Exception as e:
+                    logger.error(
+                        f"Failed to re-configure plugin {plugin_name} with runtime configs: {e}",
+                        exc_info=True
+                    )
+
+    def enable(self, name: str, config: Namespace | None = None) -> None:
         """Enable and configure a plugin.
 
         Creates an instance of the plugin and calls its configure() method.
@@ -131,8 +162,8 @@ class PluginManager:
             plugin_class = self.available[name]
             plugin = plugin_class()
 
-            # Configure the plugin with CLI args
-            plugin.configure(plugin_config)
+            # Configure the plugin with CLI args and any available runtime configs
+            plugin.configure(plugin_config, self.global_config, self.user_configs)
 
             self.enabled[name] = plugin
             logger.info(f"Enabled plugin: {name} (v{plugin.version})")

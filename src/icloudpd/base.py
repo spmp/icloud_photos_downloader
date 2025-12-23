@@ -266,6 +266,14 @@ def run_with_configs(global_config: GlobalConfig, user_configs: Sequence[UserCon
     # Create shared logger
     logger = create_logger(global_config)
 
+    # Update plugin manager with runtime configs (if plugin manager exists)
+    if plugin_manager:
+        plugin_manager.set_plugin_config(
+            plugin_manager.plugin_config,  # Keep existing namespace
+            global_config,
+            user_configs
+        )
+
     # Create shared status exchange for web server and progress tracking
     shared_status_exchange = StatusExchange()
 

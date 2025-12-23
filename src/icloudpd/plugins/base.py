@@ -5,9 +5,15 @@ All plugins should inherit from IcloudpdPlugin and implement the hooks they need
 
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser, Namespace
+from typing import TYPE_CHECKING
 
 from pyicloud_ipd.services.photos import PhotoAsset
 from pyicloud_ipd.version_size import VersionSize
+
+if TYPE_CHECKING:
+    from typing import Sequence
+
+    from icloudpd.config import GlobalConfig, UserConfig
 
 
 class IcloudpdPlugin(ABC):
@@ -82,19 +88,33 @@ class IcloudpdPlugin(ABC):
         """
         pass
     
-    def configure(self, config: Namespace) -> None:
+    def configure(
+        self,
+        config: Namespace,
+        global_config: "GlobalConfig | None" = None,
+        user_configs: "Sequence[UserConfig] | None" = None,
+    ) -> None:
         """Configure plugin from parsed CLI arguments.
-        
-        Called after argument parsing, before any downloads start.
+
+        Called twice during initialization:
+        1. Early: After CLI parsing, before configs are created (global_config and user_configs are None)
+        2. Late: After configs are created in run_with_configs (global_config and user_configs are set)
+
         Use this to initialize your plugin with the provided configuration.
-        
+
         Args:
             config: Parsed arguments namespace containing all CLI arguments
-            
+            global_config: Global configuration object (None during early call)
+            user_configs: List of user configurations (None during early call)
+
         Example:
-            >>> def configure(self, config):
+            >>> def configure(self, config, global_config=None, user_configs=None):
             ...     self.api_key = config.my_api_key
             ...     self.client = MyClient(self.api_key)
+            ...     # Use configs if available for validation
+            ...     if user_configs:
+            ...         directories = [uc.directory for uc in user_configs]
+            ...         self.validate_directories(directories)
         """
         pass
     
