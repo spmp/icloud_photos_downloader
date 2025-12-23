@@ -335,7 +335,15 @@ class ImmichPlugin(IcloudpdPlugin):
             default=5.0,
             metavar='SECONDS',
             help='Time to wait for Immich library scan to complete after adding photos '
-                 '(default: 5.0, 0 for infinite)'
+                 '(default: %(default)s, 0 for infinite)'
+        )
+
+        group.add_argument(
+            '--immich-poll-interval',
+            type=float,
+            default=1.0,
+            metavar='SECONDS',
+            help='Time to wait for between polls post scan. (default: %(default)s)'
         )
 
     # ========================================================================
@@ -365,6 +373,7 @@ class ImmichPlugin(IcloudpdPlugin):
         self.library_id = getattr(config, 'immich_library_id', None)
         self.process_existing = getattr(config, 'immich_process_existing', False)
         self.scan_timeout = getattr(config, 'immich_scan_timeout', 5.0)
+        self.poll_interval = getattr(config, 'immich_poll_interval', 1.0)
 
         # Parse stack_media argument (False, None=all, or list of sizes)
         stack_arg = getattr(config, 'immich_stack_media', False)
@@ -424,6 +433,7 @@ class ImmichPlugin(IcloudpdPlugin):
         print(f"  Library ID:        {self.library_id}")
         print(f"  Process Existing:  {self.process_existing}")
         print(f"  Scan Timeout:      {self.scan_timeout}s")
+        print(f"  Poll interval:     {self.poll_interval}s")
         print(f"  Stack Media:       {self.stack_media}")
         if self.stack_media:
             print(f"  Stack Priority:    {', '.join(self.stack_priority)}")
@@ -462,7 +472,6 @@ class ImmichPlugin(IcloudpdPlugin):
         # Rejoin, ensuring we preserve leading /
         result = '/'.join(base_parts)
         # Normalize path (remove duplicate slashes, etc.)
-        from pathlib import Path
         return str(Path(result))
 
     @staticmethod
@@ -476,7 +485,6 @@ class ImmichPlugin(IcloudpdPlugin):
         Returns:
             True if child is within parent directory
         """
-        from pathlib import Path
         try:
             child_path = Path(child).resolve()
             parent_path = Path(parent).resolve()
@@ -564,8 +572,8 @@ class ImmichPlugin(IcloudpdPlugin):
         assert self.library_id is not None
 
         try:
-            # Test general connection with /api/server-info
-            url = f"{self.server_url}/api/server-info"
+            # Test general connection with /api/server/about
+            url = f"{self.server_url}/api/server/about"
             headers = {"x-api-key": self.api_key}
 
             response = requests.get(url, headers=headers, timeout=10)
@@ -640,60 +648,72 @@ class ImmichPlugin(IcloudpdPlugin):
         pass
 
     # ========================================================================
-    # Live Photo Hooks - Track Live Photo Filename
+    # Live Photo Hooks - COMMENTED OUT (not needed - Immich handles automatically)
     # ========================================================================
-
-    def on_download_exists_live(
-        self,
-        download_path: str,
-        photo_filename: str,
-        download_size: VersionSize,
-        photo: PhotoAsset,
-        dry_run: bool,
-    ) -> None:
-        """Live photo exists - track filename for later association"""
-        if self.process_existing:
-            logger.debug(f"Immich: Accumulating existing live photo {download_size.value} - {download_path}")
-            self.current_photo_files.append({
-                'status': 'existed',
-                'path': download_path,
-                'size': download_size.value,
-                'is_live': True,
-                'photo_filename': photo_filename,
-            })
-            # Track that this photo has a live component
-            self.live_photo_filename = photo_filename
-
-    def on_download_downloaded_live(
-        self,
-        download_path: str,
-        photo_filename: str,
-        download_size: VersionSize,
-        photo: PhotoAsset,
-        dry_run: bool,
-    ) -> None:
-        """Live photo downloaded - track filename for later association"""
-        logger.debug(f"Immich: Accumulating downloaded live photo {download_size.value} - {download_path}")
-        self.current_photo_files.append({
-            'status': 'downloaded',
-            'path': download_path,
-            'size': download_size.value,
-            'is_live': True,
-            'photo_filename': photo_filename,
-        })
-        # Track that this photo has a live component
-        self.live_photo_filename = photo_filename
-
-    def on_download_complete_live(
-        self,
-        download_path: str,
-        photo_filename: str,
-        download_size: VersionSize,
-        photo: PhotoAsset,
-        dry_run: bool,
-    ) -> None:
-        """Live photo processing complete - hook available but not needed"""
-        pass
+    #
+    # Live photo videos are NOT processed separately. They are automatically
+    # associated with the main photo asset by Immich when we use the
+    # livePhotoVideoId association in Step 5 of on_download_all_sizes_complete.
+    #
+    # We do NOT want to:
+    # - Track live photo videos as separate files
+    # - Search for them in Immich
+    # - Stack them
+    # - Add them to albums
+    #
+    # The live photo video is handled entirely through the association API.
+    #
+    # def on_download_exists_live(
+    #     self,
+    #     download_path: str,
+    #     photo_filename: str,
+    #     download_size: VersionSize,
+    #     photo: PhotoAsset,
+    #     dry_run: bool,
+    # ) -> None:
+    #     """Live photo exists - track filename for later association"""
+    #     if self.process_existing:
+    #         logger.debug(f"Immich: Accumulating existing live photo {download_size.value} - {download_path}")
+    #         self.current_photo_files.append({
+    #             'status': 'existed',
+    #             'path': download_path,
+    #             'size': download_size.value,
+    #             'is_live': True,
+    #             'photo_filename': photo_filename,
+    #         })
+    #         # Track that this photo has a live component
+    #         self.live_photo_filename = photo_filename
+    #
+    # def on_download_downloaded_live(
+    #     self,
+    #     download_path: str,
+    #     photo_filename: str,
+    #     download_size: VersionSize,
+    #     photo: PhotoAsset,
+    #     dry_run: bool,
+    # ) -> None:
+    #     """Live photo downloaded - track filename for later association"""
+    #     logger.debug(f"Immich: Accumulating downloaded live photo {download_size.value} - {download_path}")
+    #     self.current_photo_files.append({
+    #         'status': 'downloaded',
+    #         'path': download_path,
+    #         'size': download_size.value,
+    #         'is_live': True,
+    #         'photo_filename': photo_filename,
+    #     })
+    #     # Track that this photo has a live component
+    #     self.live_photo_filename = photo_filename
+    #
+    # def on_download_complete_live(
+    #     self,
+    #     download_path: str,
+    #     photo_filename: str,
+    #     download_size: VersionSize,
+    #     photo: PhotoAsset,
+    #     dry_run: bool,
+    # ) -> None:
+    #     """Live photo processing complete - hook available but not needed"""
+    #     pass
 
     # ========================================================================
     # Immich API Functions
@@ -719,14 +739,14 @@ class ImmichPlugin(IcloudpdPlugin):
         response.raise_for_status()
         logger.debug(f"Library scan triggered: {response.status_code}")
 
-    def _search_assets_by_originalpath(self, path_prefix: str) -> List[Dict[str, Any]]:
-        """Search for assets by originalPath prefix.
+    def _search_asset_by_path(self, file_path: str) -> Dict[str, Any] | None:
+        """Search for a single asset by exact originalPath.
 
         Args:
-            path_prefix: The path prefix to search for (without extension or size suffix)
+            file_path: The exact file path to search for
 
         Returns:
-            List of asset dictionaries from Immich API
+            Asset dictionary from Immich API, or None if not found
 
         Raises:
             requests.RequestException: If API call fails
@@ -735,39 +755,45 @@ class ImmichPlugin(IcloudpdPlugin):
         assert self.api_key is not None
         url = f"{self.server_url}/api/search/metadata"
         headers = {"x-api-key": self.api_key}
-        body = {"originalPath": f"{path_prefix}*"}
+        body = {"originalPath": file_path}
 
-        logger.debug(f"POST {url} (searching for: {path_prefix}*)")
+        logger.debug(f"POST {url} (searching for: {file_path})")
         response = requests.post(url, headers=headers, json=body, timeout=30)
         response.raise_for_status()
         data = response.json()
 
         # Extract assets from response: {"assets": {"items": [...]}}
         assets = data.get("assets", {}).get("items", [])
-        logger.debug(f"Found {len(assets)} assets matching prefix")
-        return assets
 
-    def _create_stack(self, asset_ids: List[str], primary_id: str) -> None:
+        if assets:
+            # Should only be one exact match
+            asset = assets[0]
+            logger.debug(f"Found asset: {asset.get('id')}")
+            return asset
+
+        logger.debug("Asset not found")
+        return None
+
+    def _create_stack(self, asset_ids: List[str]) -> None:
         """Create a stack in Immich with specified assets.
 
         Args:
-            asset_ids: List of asset IDs to stack together
-            primary_id: Asset ID to use as stack primary
+            asset_ids: List of asset IDs to stack together (first = primary)
 
         Raises:
             requests.RequestException: If API call fails
         """
         assert self.server_url is not None
         assert self.api_key is not None
-        url = f"{self.server_url}/api/assets/stack"
+        url = f"{self.server_url}/api/stacks"
         headers = {"x-api-key": self.api_key}
         body = {
             "assetIds": asset_ids
         }
 
-        logger.debug(f"PUT {url}")
-        logger.debug(f"  Stacking {len(asset_ids)} assets, primary: {primary_id}")
-        response = requests.put(url, headers=headers, json=body, timeout=30)
+        logger.debug(f"POST {url}")
+        logger.debug(f"  Stacking {len(asset_ids)} assets, primary: {asset_ids[0]}")
+        response = requests.post(url, headers=headers, json=body, timeout=30)
         response.raise_for_status()
         logger.debug("Stack created successfully")
 
@@ -884,26 +910,6 @@ class ImmichPlugin(IcloudpdPlugin):
     # Processing Logic
     # ========================================================================
 
-    def _extract_path_prefix(self, full_path: str) -> str:
-        """Extract the path prefix for searching (remove extension and size suffix).
-
-        Args:
-            full_path: Full path like /path/to/IMG_1234_UUID-original.HEIC
-
-        Returns:
-            Path prefix like /path/to/IMG_1234_UUID
-        """
-        path = Path(full_path)
-        stem = path.stem
-
-        # Remove size suffix (e.g., -original, -medium, -adjusted)
-        for size in ['original', 'medium', 'adjusted', 'thumb', 'alternative']:
-            if stem.endswith(f'-{size}'):
-                stem = stem[:-len(f'-{size}')]
-                break
-
-        return str(path.parent / stem)
-
     def _wait_for_assets(
         self,
         expected_files: List[Dict[str, Any]],
@@ -912,6 +918,7 @@ class ImmichPlugin(IcloudpdPlugin):
         """Wait for all expected files to appear in Immich after scan.
 
         Polls Immich every 50ms until all files are found or timeout occurs.
+        Searches for each file individually by exact path.
 
         Args:
             expected_files: List of file info dicts from current_photo_files
@@ -926,30 +933,23 @@ class ImmichPlugin(IcloudpdPlugin):
         if not expected_files:
             return {}
 
-        # Extract path prefix from first file (all should share same base)
-        first_path = expected_files[0]['path']
-        path_prefix = self._extract_path_prefix(first_path)
-
         # Build set of expected paths for quick lookup
         expected_paths = {f['path'] for f in expected_files}
 
         logger.info(f"  Waiting for {len(expected_paths)} assets to appear in Immich...")
-        logger.debug(f"  Search prefix: {path_prefix}")
 
         start_time = time.time()
-        poll_interval = 0.05  # 50ms
         found_assets: Dict[str, Dict[str, Any]] = {}
+        paths_to_search = list(expected_paths)  # Paths we haven't found yet
 
         while True:
-            # Search for assets
-            assets = self._search_assets_by_originalpath(path_prefix)
-
-            # Match found assets to expected paths
-            for asset in assets:
-                asset_path = asset.get('originalPath', '')
-                if asset_path in expected_paths and asset_path not in found_assets:
-                    found_assets[asset_path] = asset
-                    logger.debug(f"    Found: {asset_path} -> {asset.get('id', 'unknown')}")
+            # Search for each file we haven't found yet
+            for file_path in list(paths_to_search):  # Use list() to avoid modification during iteration
+                asset = self._search_asset_by_path(file_path)
+                if asset:
+                    found_assets[file_path] = asset
+                    paths_to_search.remove(file_path)
+                    logger.debug(f"    Found: {file_path} -> {asset.get('id', 'unknown')}")
 
             # Check if all found
             if len(found_assets) == len(expected_paths):
@@ -967,7 +967,7 @@ class ImmichPlugin(IcloudpdPlugin):
                 sys.exit(1)
 
             # Sleep before next poll
-            time.sleep(poll_interval)
+            time.sleep(self.poll_interval)
 
     # ========================================================================
     # Main Processing Hook
@@ -1021,10 +1021,8 @@ class ImmichPlugin(IcloudpdPlugin):
         try:
             self._trigger_library_scan(self.library_id)
         except requests.RequestException as e:
-            logger.error(f"Failed to trigger library scan: {e}")
-            self.current_photo_files.clear()
-            self.live_photo_filename = None
-            return
+            logger.error(f"FATAL: Failed to trigger library scan: {e}")
+            sys.exit(1)
 
         # Step 2: Wait for all files to appear in Immich
         try:
@@ -1041,16 +1039,18 @@ class ImmichPlugin(IcloudpdPlugin):
             asset = found_assets.get(path)
 
             if not asset:
-                logger.error(f"Asset not found for {path} (should not happen)")
-                continue
+                logger.error(f"FATAL: Asset not found for {path} after scan (should never happen)")
+                logger.error("This indicates a critical issue with Immich asset registration")
+                sys.exit(1)
+
+            # Get livePhotoVideoId from asset metadata (not from our tracking)
+            live_photo_video_id = asset.get('livePhotoVideoId')
 
             self.current_immich_assets.append({
                 'size': file_info['size'],
                 'asset_id': asset.get('id'),
                 'path': path,
-                'is_live': file_info['is_live'],
-                'photo_filename': file_info['photo_filename'],
-                'live_photo_video_id': asset.get('livePhotoVideoId'),
+                'live_photo_video_id': live_photo_video_id,
             })
 
             logger.info(f"  Registered {file_info['size']}: {path} -> {asset.get('id')}")
@@ -1081,39 +1081,41 @@ class ImmichPlugin(IcloudpdPlugin):
     def _stack_size_variants(self) -> None:
         """Stack size variants based on priority configuration.
 
-        Only stacks regular (non-live) assets. Live photos are handled separately.
+        Creates an ordered list of asset IDs based on stack_priority config.
+        First asset in the list becomes the primary (Immich uses first as primary).
         """
-        # Only stack regular (non-live) assets
-        regular_assets = [a for a in self.current_immich_assets if not a['is_live']]
-
-        if len(regular_assets) <= 1:
+        if len(self.current_immich_assets) <= 1:
             logger.debug("  No size variants to stack (only 1 asset)")
             return
 
-        # Determine primary based on priority list (first in list = primary)
-        asset_ids = [a['asset_id'] for a in regular_assets]
+        # Build ordered list of asset IDs based on stack_priority
+        # First in list = primary (Immich convention)
+        ordered_asset_ids = []
 
-        # Find primary: first size in stack_priority that exists
-        primary_id = None
+        # Add assets in priority order
         for size in self.stack_priority:
-            for asset in regular_assets:
+            for asset in self.current_immich_assets:
                 if asset['size'] == size:
-                    primary_id = asset['asset_id']
-                    break
-            if primary_id:
-                break
+                    ordered_asset_ids.append(asset['asset_id'])
+                    break  # Only add each size once
 
-        # Fallback to first asset if no priority match
-        if not primary_id:
-            primary_id = asset_ids[0]
+        # Add any remaining assets not in priority list (shouldn't happen but be safe)
+        for asset in self.current_immich_assets:
+            if asset['asset_id'] not in ordered_asset_ids:
+                ordered_asset_ids.append(asset['asset_id'])
 
-        # Create stack
+        if len(ordered_asset_ids) <= 1:
+            logger.debug("  No size variants to stack (only 1 asset after ordering)")
+            return
+
+        # Create stack with ordered IDs (first = primary)
         try:
-            self._create_stack(asset_ids, primary_id)
-            logger.info(f"  Stacked {len(asset_ids)} size variants (primary: {primary_id})")
+            self._create_stack(ordered_asset_ids)
+            logger.info(f"  Stacked {len(ordered_asset_ids)} size variants (primary: {ordered_asset_ids[0]})")
             self.total_stacked += 1
         except requests.RequestException as e:
-            logger.error(f"Failed to create stack: {e}")
+            logger.error(f"FATAL: Failed to create stack: {e}")
+            sys.exit(1)
 
     def _associate_live_photos(self) -> None:
         """Associate live photo video with other size variants.
@@ -1149,7 +1151,8 @@ class ImmichPlugin(IcloudpdPlugin):
                 logger.info(f"  Associated live video with {asset['size']}")
                 associated_count += 1
             except requests.RequestException as e:
-                logger.error(f"Failed to associate live photo with {asset['size']}: {e}")
+                logger.error(f"FATAL: Failed to associate live photo with {asset['size']}: {e}")
+                sys.exit(1)
 
         if associated_count > 0:
             self.total_live_associated += associated_count
@@ -1160,10 +1163,6 @@ class ImmichPlugin(IcloudpdPlugin):
         asset_ids_to_favorite = []
 
         for asset in self.current_immich_assets:
-            # Skip live photos (only favorite images, not videos)
-            if asset['is_live']:
-                continue
-
             # Check if this size should be favorited
             if asset['size'] in self.favorite_sizes:
                 asset_ids_to_favorite.append(asset['asset_id'])
@@ -1178,7 +1177,8 @@ class ImmichPlugin(IcloudpdPlugin):
             logger.info(f"  Marked {len(asset_ids_to_favorite)} assets as favorite")
             self.total_favorited += len(asset_ids_to_favorite)
         except requests.RequestException as e:
-            logger.error(f"Failed to mark favorites: {e}")
+            logger.error(f"FATAL: Failed to mark favorites: {e}")
+            sys.exit(1)
 
     def _apply_album_rules(self, photo: PhotoAsset) -> None:
         """Apply all album rules to determine which assets go in which albums.
@@ -1200,12 +1200,9 @@ class ImmichPlugin(IcloudpdPlugin):
                 logger.error(f"Error parsing album template '{rule.template}': {e}")
                 continue
 
-            # Find matching assets (skip live photos - only add images to albums)
+            # Find matching assets
             matching_asset_ids = []
             for asset in self.current_immich_assets:
-                if asset['is_live']:
-                    continue  # Don't add live videos to albums
-
                 if rule.matches(asset['size']):
                     matching_asset_ids.append(asset['asset_id'])
 
@@ -1225,7 +1222,8 @@ class ImmichPlugin(IcloudpdPlugin):
                 logger.info(f"  Added {len(asset_ids)} assets to album '{album_name}'")
                 self.total_added_to_albums += 1
             except requests.RequestException as e:
-                logger.error(f"Failed to add assets to album '{album_name}': {e}")
+                logger.error(f"FATAL: Failed to add assets to album '{album_name}': {e}")
+                sys.exit(1)
 
     # ========================================================================
     # Run Complete Hook
