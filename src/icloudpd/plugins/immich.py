@@ -37,13 +37,18 @@ import sys
 import time
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 import requests
 
 from icloudpd.plugins.base import IcloudpdPlugin
 from pyicloud_ipd.services.photos import PhotoAsset
 from pyicloud_ipd.version_size import VersionSize
+
+if TYPE_CHECKING:
+    from typing import Sequence
+
+    from icloudpd.config import GlobalConfig, UserConfig
 
 logger = logging.getLogger(__name__)
 
@@ -233,8 +238,6 @@ class ImmichPlugin(IcloudpdPlugin):
         self.total_added_to_albums = 0
         self.total_live_associated = 0
 
-        print("SDKJKHSDSDKJH HELLO")
-
     @property
     def name(self) -> str:
         """Plugin name"""
@@ -339,8 +342,23 @@ class ImmichPlugin(IcloudpdPlugin):
     # Plugin Configuration
     # ========================================================================
 
-    def configure(self, config: Namespace) -> None:
-        """Configure Immich plugin from CLI arguments"""
+    def configure(
+        self,
+        config: Namespace,
+        global_config: "GlobalConfig | None" = None,
+        user_configs: "Sequence[UserConfig] | None" = None,
+    ) -> None:
+        """Configure Immich plugin from CLI arguments and runtime configs.
+
+        This is called twice:
+        1. Early (from cli.py): Only config is available
+        2. Late (from base.py): All parameters are available
+
+        Args:
+            config: Parsed CLI arguments namespace
+            global_config: Global configuration (None on first call)
+            user_configs: List of user configurations (None on first call)
+        """
         # Basic configuration
         self.server_url = getattr(config, 'immich_server_url', None)
         self.api_key = getattr(config, 'immich_api_key', None)
@@ -420,6 +438,119 @@ class ImmichPlugin(IcloudpdPlugin):
         if self.server_url and self.api_key:
             self._test_immich_connection()
 
+            # Validate directories when user_configs are available (second call from base.py)
+            if user_configs is not None:
+                self._validate_directories(user_configs)
+
+
+    @staticmethod
+    def _strip_date_templates(path: str) -> str:
+        """Strip date templates from a directory path.
+
+        Converts paths like '/a/b/c/%Y/%m' to '/a/b/c'
+
+        Args:
+            path: Directory path potentially containing date templates
+
+        Returns:
+            Base path with date templates removed
+        """
+        # Remove path components that contain % (date templates)
+        parts = path.split('/')
+        # Keep only parts that don't contain %
+        base_parts = [p for p in parts if '%' not in p]
+        # Rejoin, ensuring we preserve leading /
+        result = '/'.join(base_parts)
+        # Normalize path (remove duplicate slashes, etc.)
+        from pathlib import Path
+        return str(Path(result))
+
+    @staticmethod
+    def _is_subdirectory(child: str, parent: str) -> bool:
+        """Check if child path is within parent directory.
+
+        Args:
+            child: Potential subdirectory path
+            parent: Parent directory path
+
+        Returns:
+            True if child is within parent directory
+        """
+        from pathlib import Path
+        try:
+            child_path = Path(child).resolve()
+            parent_path = Path(parent).resolve()
+            # Check if child is relative to parent (will raise ValueError if not)
+            child_path.relative_to(parent_path)
+            return True
+        except (ValueError, RuntimeError):
+            return False
+
+    def _validate_directories(self, user_configs: "Sequence[UserConfig]") -> None:
+        """Validate that all icloudpd directories are within Immich library importPaths.
+
+        Args:
+            user_configs: List of user configurations containing directory settings
+
+        Raises:
+            SystemExit: If any directory is not within library importPaths
+        """
+        assert self.server_url is not None
+        assert self.api_key is not None
+        assert self.library_id is not None
+
+        try:
+            # Fetch library data to get importPaths
+            url = f"{self.server_url}/api/libraries/{self.library_id}"
+            headers = {"x-api-key": self.api_key}
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+
+            library_data = response.json()
+            import_paths = library_data.get('importPaths', [])
+
+            if not import_paths:
+                print("Warning: Immich library has no importPaths configured", file=sys.stderr)
+                print("Please configure importPaths in your Immich library settings", file=sys.stderr)
+                sys.exit(1)
+
+            # Collect all directories from user configs
+            user_directories = []
+            for user_config in user_configs:
+                directory = user_config.directory
+                # Strip date templates from the directory path
+                base_directory = self._strip_date_templates(directory)
+                user_directories.append((directory, base_directory))
+
+            # Validate each directory is within at least one importPath
+            invalid_dirs = []
+            for original_dir, base_dir in user_directories:
+                is_valid = False
+                for import_path in import_paths:
+                    if self._is_subdirectory(base_dir, import_path):
+                        is_valid = True
+                        break
+
+                if not is_valid:
+                    invalid_dirs.append(original_dir)
+
+            # If any directories are invalid, exit with error
+            if invalid_dirs:
+                print("Error: The following icloudpd directories are not within Immich library importPaths:", file=sys.stderr)
+                for invalid_dir in invalid_dirs:
+                    print(f"  - {invalid_dir}", file=sys.stderr)
+                print("\nImmich library importPaths:", file=sys.stderr)
+                for import_path in import_paths:
+                    print(f"  - {import_path}", file=sys.stderr)
+                print("\nAll icloudpd directories must be subdirectories of at least one Immich importPath.", file=sys.stderr)
+                sys.exit(1)
+
+            # Success - print confirmation
+            print(f"  Directory validation: OK ({len(user_directories)} directories validated)")
+
+        except requests.RequestException as e:
+            print(f"Error: Failed to fetch library data for directory validation: {e}", file=sys.stderr)
+            sys.exit(1)
 
     def _test_immich_connection(self) -> None:
         """Test connection to Immich server and validate library ID.
@@ -631,8 +762,7 @@ class ImmichPlugin(IcloudpdPlugin):
         url = f"{self.server_url}/api/assets/stack"
         headers = {"x-api-key": self.api_key}
         body = {
-            "ids": asset_ids,
-            "primaryAssetId": primary_id
+            "assetIds": asset_ids
         }
 
         logger.debug(f"PUT {url}")
