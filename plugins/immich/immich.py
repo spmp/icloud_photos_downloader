@@ -205,6 +205,7 @@ class ImmichPlugin(IcloudpdPlugin):
         self.library_id: str | None = None
         self.process_existing: bool = False
         self.scan_timeout: float = 5.0
+        self.poll_interval: float = 1.0
 
         # Stacking configuration
         self.stack_media: bool = False
