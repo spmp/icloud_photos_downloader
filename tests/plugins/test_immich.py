@@ -579,6 +579,125 @@ class TestImmichPluginProcessing(unittest.TestCase):
         mock_favs.assert_called_once()
         mock_albums.assert_called_once_with(mock_photo)
 
+    @patch('plugins.immich.immich.ImmichPlugin._search_asset_by_path')
+    @patch('plugins.immich.immich.ImmichPlugin._trigger_library_scan')
+    @patch('plugins.immich.immich.ImmichPlugin._wait_for_assets')
+    @patch('plugins.immich.immich.ImmichPlugin._stack_size_variants')
+    @patch('plugins.immich.immich.ImmichPlugin._mark_favorites')
+    @patch('plugins.immich.immich.ImmichPlugin._apply_album_rules')
+    def test_on_download_all_sizes_complete_existing_assets_found(
+        self, mock_albums, mock_favs, mock_stack, mock_wait, mock_trigger, mock_search
+    ):
+        """Test optimization: skip scan when all existing files are already registered"""
+        mock_photo = Mock(spec=PhotoAsset)
+        mock_photo.created = Mock()
+        mock_photo._asset_record = {
+            'fields': {
+                'isFavorite': {'value': 0}
+            }
+        }
+
+        # All files have status 'existed'
+        self.plugin.current_photo_files = [
+            {
+                'path': '/photos/IMG_001.jpg',
+                'size': 'adjusted',
+                'status': 'existed',
+                'is_live': False,
+                'photo_filename': 'IMG_001.jpg',
+            },
+            {
+                'path': '/photos/IMG_001-medium.jpg',
+                'size': 'medium',
+                'status': 'existed',
+                'is_live': False,
+                'photo_filename': 'IMG_001.jpg',
+            },
+        ]
+
+        # Mock that all assets are found
+        mock_search.side_effect = [
+            {'id': 'asset-1', 'originalPath': '/photos/IMG_001.jpg'},
+            {'id': 'asset-2', 'originalPath': '/photos/IMG_001-medium.jpg'},
+        ]
+
+        self.plugin.on_download_all_sizes_complete(photo=mock_photo, dry_run=False)
+
+        # Verify scan was NOT triggered (optimization worked)
+        mock_trigger.assert_not_called()
+        mock_wait.assert_not_called()
+
+        # Verify search was called for each file
+        self.assertEqual(mock_search.call_count, 2)
+
+        # Verify other methods were still called
+        mock_stack.assert_called_once()
+        mock_favs.assert_not_called()  # Photo not favorite
+        mock_albums.assert_called_once_with(mock_photo)
+
+        # Verify accumulators were cleared at end
+        self.assertEqual(len(self.plugin.current_immich_assets), 0)
+        self.assertEqual(len(self.plugin.current_photo_files), 0)
+
+    @patch('plugins.immich.immich.ImmichPlugin._search_asset_by_path')
+    @patch('plugins.immich.immich.ImmichPlugin._trigger_library_scan')
+    @patch('plugins.immich.immich.ImmichPlugin._wait_for_assets')
+    @patch('plugins.immich.immich.ImmichPlugin._stack_size_variants')
+    @patch('plugins.immich.immich.ImmichPlugin._mark_favorites')
+    @patch('plugins.immich.immich.ImmichPlugin._apply_album_rules')
+    def test_on_download_all_sizes_complete_existing_assets_missing(
+        self, mock_albums, mock_favs, mock_stack, mock_wait, mock_trigger, mock_search
+    ):
+        """Test that scan is triggered when existing files are not all registered"""
+        mock_photo = Mock(spec=PhotoAsset)
+        mock_photo.created = Mock()
+        mock_photo._asset_record = {
+            'fields': {
+                'isFavorite': {'value': 0}
+            }
+        }
+
+        # All files have status 'existed'
+        self.plugin.current_photo_files = [
+            {
+                'path': '/photos/IMG_001.jpg',
+                'size': 'adjusted',
+                'status': 'existed',
+                'is_live': False,
+                'photo_filename': 'IMG_001.jpg',
+            },
+            {
+                'path': '/photos/IMG_001-medium.jpg',
+                'size': 'medium',
+                'status': 'existed',
+                'is_live': False,
+                'photo_filename': 'IMG_001.jpg',
+            },
+        ]
+
+        # Mock that only one asset is found initially
+        mock_search.side_effect = [
+            {'id': 'asset-1', 'originalPath': '/photos/IMG_001.jpg'},
+            None,  # Second asset not found
+        ]
+
+        # Mock wait_for_assets to return both assets
+        mock_wait.return_value = {
+            '/photos/IMG_001.jpg': {'id': 'asset-1', 'originalPath': '/photos/IMG_001.jpg'},
+            '/photos/IMG_001-medium.jpg': {'id': 'asset-2', 'originalPath': '/photos/IMG_001-medium.jpg'},
+        }
+
+        self.plugin.on_download_all_sizes_complete(photo=mock_photo, dry_run=False)
+
+        # Verify scan WAS triggered (some assets missing)
+        mock_trigger.assert_called_once()
+        mock_wait.assert_called_once()
+
+        # Verify other methods were still called
+        mock_stack.assert_called_once()
+        mock_favs.assert_not_called()
+        mock_albums.assert_called_once_with(mock_photo)
+
 
 class TestImmichPluginStacking(unittest.TestCase):
     """Test ImmichPlugin media stacking functionality"""

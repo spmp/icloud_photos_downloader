@@ -310,15 +310,15 @@ class PluginManager:
     
     def call_hook(self, hook_name: str, **kwargs) -> None:
         """Call a hook on all enabled plugins.
-        
+
         Calls the specified hook method on each enabled plugin.
         If a plugin's hook raises an exception, it's logged but
         doesn't stop other plugins from running.
-        
+
         Args:
             hook_name: Name of the hook method to call
             **kwargs: Arguments to pass to the hook
-            
+
         Example:
             >>> manager.call_hook('on_photo_downloaded',
             ...                  photo_id='ABC123',

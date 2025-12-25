@@ -983,13 +983,16 @@ class ImmichPlugin(IcloudpdPlugin):
         """Process all accumulated files after all sizes are downloaded.
 
         Workflow:
-        1. Trigger library scan
-        2. Wait for all files to appear in Immich
-        3. Stack size variants (if enabled)
-        4. Associate live photos with other sizes (if enabled)
-        5. Mark favorites (if enabled and photo is iCloud favorite)
-        6. Add to albums based on rules
-        7. Clear accumulators
+        1. If all files existed (not downloaded), check if assets already registered
+           - If all assets found, skip library scan (optimization)
+           - If any assets missing, trigger scan
+        2. Otherwise, trigger library scan
+        3. Wait for all files to appear in Immich (if scan was triggered)
+        4. Stack size variants (if enabled)
+        5. Associate live photos with other sizes (if enabled)
+        6. Mark favorites (if enabled and photo is iCloud favorite)
+        7. Add to albums based on rules
+        8. Clear accumulators
 
         Args:
             photo: PhotoAsset with metadata (for favorite status, date, etc.)
@@ -1018,22 +1021,44 @@ class ImmichPlugin(IcloudpdPlugin):
             self.live_photo_filename = None
             return
 
-        # Step 1: Trigger library scan
-        logger.info(f"  Triggering library scan for {len(self.current_photo_files)} files")
-        try:
-            self._trigger_library_scan(self.library_id)
-        except requests.RequestException as e:
-            logger.error(f"FATAL: Failed to trigger library scan: {e}")
-            sys.exit(1)
+        # Optimization: If all files already existed, check if assets exist before scanning
+        all_files_existed = all(f['status'] == 'existed' for f in self.current_photo_files)
+        found_assets: Dict[str, Dict[str, Any]] = {}
 
-        # Step 2: Wait for all files to appear in Immich
-        try:
-            found_assets = self._wait_for_assets(
-                expected_files=self.current_photo_files,
-                timeout=self.scan_timeout
-            )
-        except SystemExit:
-            raise  # Timeout - exit icloudpd
+        if all_files_existed:
+            logger.info(f"  All files already existed, checking if assets already registered...")
+            # Try to find all assets without triggering a scan
+            for file_info in self.current_photo_files:
+                asset = self._search_asset_by_path(file_info['path'])
+                if asset:
+                    found_assets[file_info['path']] = asset
+
+            # If we found all assets, skip the scan
+            if len(found_assets) == len(self.current_photo_files):
+                logger.info(f"  All {len(found_assets)} assets already registered, skipping scan")
+            else:
+                # Some assets missing, need to scan
+                logger.info(f"  Found {len(found_assets)}/{len(self.current_photo_files)} assets, triggering scan for missing files")
+                found_assets = {}  # Clear and do full scan workflow
+
+        # Step 1 & 2: Trigger scan and wait (if needed)
+        if not found_assets:  # Empty dict means we need to scan
+            # Step 1: Trigger library scan
+            logger.info(f"  Triggering library scan for {len(self.current_photo_files)} files")
+            try:
+                self._trigger_library_scan(self.library_id)
+            except requests.RequestException as e:
+                logger.error(f"FATAL: Failed to trigger library scan: {e}")
+                sys.exit(1)
+
+            # Step 2: Wait for all files to appear in Immich
+            try:
+                found_assets = self._wait_for_assets(
+                    expected_files=self.current_photo_files,
+                    timeout=self.scan_timeout
+                )
+            except SystemExit:
+                raise  # Timeout - exit icloudpd
 
         # Step 3: Build current_immich_assets from found assets
         for file_info in self.current_photo_files:
