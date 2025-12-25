@@ -50,7 +50,8 @@ if TYPE_CHECKING:
 
     from icloudpd.config import GlobalConfig, UserConfig
 
-logger = logging.getLogger(__name__)
+# Use icloudpd namespace for logging so it inherits the configured log level
+logger = logging.getLogger("icloudpd.plugins.immich")
 
 
 # ============================================================================
