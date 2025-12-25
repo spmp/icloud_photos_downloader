@@ -702,6 +702,10 @@ def download_builder(
     )  # Default to skipped for files that aren't downloaded
 
     for download_size in primary_sizes:
+        # Keep track of the originally requested size for filename generation
+        # even if we fall back to a different version for the actual download
+        requested_size = download_size
+
         if download_size not in versions and download_size != AssetVersionSize.ORIGINAL:
             if force_size:
                 error_filename = filename_builder(photo)
@@ -720,10 +724,10 @@ def download_builder(
         filename = calculate_version_filename(
             photo_filename,
             version,
-            download_size,
+            requested_size,  # Use requested size for filename, not fallback size
             lp_filename_generator,
             photo.item_type,
-            filename_overrides.get(download_size),
+            filename_overrides.get(requested_size),  # Also use requested size for override lookup
         )
 
         download_path = local_download_path(filename, download_dir)
@@ -757,7 +761,7 @@ def download_builder(
                             'on_download_exists',
                             download_path=download_path,
                             photo_filename=photo_filename,
-                            download_size=download_size,
+                            download_size=requested_size,  # Use requested size, not fallback
                             photo=photo,
                             dry_run=dry_run,
                         )
@@ -825,7 +829,7 @@ def download_builder(
                             'on_download_downloaded',
                             download_path=download_path,
                             photo_filename=photo_filename,
-                            download_size=download_size,
+                            download_size=requested_size,  # Use requested size, not fallback
                             photo=photo,
                             dry_run=dry_run,
                         )
@@ -840,10 +844,10 @@ def download_builder(
         if plugin_manager:
             try:
                 plugin_manager.call_hook(
-                    'on_download_complete', 
+                    'on_download_complete',
                     download_path=download_path,
                     photo_filename=photo_filename,
-                    download_size=download_size,
+                    download_size=requested_size,  # Use requested size, not fallback
                     photo=photo,
                     dry_run=dry_run,
                 )

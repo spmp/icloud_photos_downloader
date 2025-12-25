@@ -26,6 +26,8 @@ ITEM_TYPE_EXTENSIONS = {
 }
 
 VERSION_FILENAME_SUFFIX_LOOKUP: Dict[VersionSize, str] = {
+    AssetVersionSize.ADJUSTED: "adjusted",
+    AssetVersionSize.ALTERNATIVE: "alternative",
     AssetVersionSize.MEDIUM: "medium",
     AssetVersionSize.THUMB: "thumb",
 }

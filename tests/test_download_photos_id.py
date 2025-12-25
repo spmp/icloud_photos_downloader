@@ -569,8 +569,9 @@ class DownloadPhotoNameIDTestCase(TestCase):
     def test_size_fallback_to_original_name_id7(self) -> None:
         base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])
 
+        # When thumb doesn't exist and falls back to original, filename should still include -thumb suffix
         files_to_download = [
-            ("2018/07/31", "IMG_7409_QVk2Yyt.JPG"),
+            ("2018/07/31", "IMG_7409_QVk2Yyt-thumb.JPG"),
         ]
 
         data_dir, result = run_icloudpd_test(
@@ -604,7 +605,7 @@ class DownloadPhotoNameIDTestCase(TestCase):
             result.output,
         )
         self.assertIn(
-            f"Downloading {truncate_middle(os.path.join(data_dir, os.path.normpath('2018/07/31/IMG_7409_QVk2Yyt.JPG')), 96)}",
+            f"Downloading {truncate_middle(os.path.join(data_dir, os.path.normpath('2018/07/31/IMG_7409_QVk2Yyt-thumb.JPG')), 96)}",
             result.output,
         )
         self.assertIn("All photos and videos have been downloaded", result.output)
@@ -614,13 +615,15 @@ class DownloadPhotoNameIDTestCase(TestCase):
     def test_adjusted_size_fallback_to_original_name_id7(self) -> None:
         base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])
 
+        # When adjusted/alternative don't exist and fallback to original, filenames should include suffixes
+        # Both fallback to the same original JPG file, so both get .JPG extension
         data_dir, result = run_icloudpd_test(
             self.assertEqual,
             self.root_path,
             base_dir,
             "listing_photos_fallback_to_original.yml",
             [],
-            [("2018/07/31", "IMG_7409_QVk2Yyt.JPG"), ("2018/07/31", "IMG_7409_QVk2Yyt.MOV")],
+            [("2018/07/31", "IMG_7409_QVk2Yyt-adjusted.JPG"), ("2018/07/31", "IMG_7409_QVk2Yyt-alternative.JPG")],
             [
                 "--username",
                 "jdoe@gmail.com",
@@ -648,7 +651,11 @@ class DownloadPhotoNameIDTestCase(TestCase):
             result.output,
         )
         self.assertIn(
-            "IMG_7409_QVk2Yyt.JPG",
+            "IMG_7409_QVk2Yyt-adjusted.JPG",
+            result.output,
+        )
+        self.assertIn(
+            "IMG_7409_QVk2Yyt-alternative.JPG",
             result.output,
         )
         self.assertIn("All photos and videos have been downloaded", result.output)
@@ -2126,3 +2133,130 @@ class DownloadPhotoNameIDTestCase(TestCase):
             result.output,
         )
         self.assertIn("All photos have been downloaded", result.output)
+
+    def test_adjusted_size_uuid_consistency_name_id7(self) -> None:
+        """Test that with name-id7, checking for existing adjusted files uses UUID.
+
+        This test SHOULD FAIL until the bug is fixed.
+
+        BUG: When using --file-match-policy name-id7 and an adjusted file with UUID exists
+        (IMG_NNNN_UUID-adjusted.ext), icloudpd doesn't recognize it during file existence
+        check and creates a duplicate without UUID (IMG_NNNN-adjusted.ext).
+
+        This is actually tested better by test_no_redownload_with_uuid_filenames_name_id7,
+        so this is a simpler version that just documents the expected filenames.
+        """
+        base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])
+
+        # Scenario: User manually creates correct UUID-named adjusted file
+        # icloudpd should recognize it exists and NOT download again
+        files_to_create = [
+            ("2018/07/31", "IMG_7409_QVk2Yyt-adjusted.JPG", 1151066),  # Correct UUID naming
+        ]
+
+        # Expected: NO files downloaded since adjusted already exists (FIXED!)
+        files_to_download: List[Tuple[str, str]] = []
+
+        data_dir, result = run_icloudpd_test(
+            self.assertEqual,
+            self.root_path,
+            base_dir,
+            "listing_photos_fallback_to_original.yml",
+            files_to_create,
+            files_to_download,
+            [
+                "--username",
+                "jdoe@gmail.com",
+                "--password",
+                "password1",
+                "--recent",
+                "1",
+                "--size",
+                "adjusted",
+                "--skip-live-photos",
+                "--no-progress-bar",
+                "--threads-num",
+                "1",
+                "--file-match-policy",
+                "name-id7",
+            ],
+        )
+
+        assert result.exit_code == 0
+
+        # Verify the correct file is recognized
+        adjusted_correct_path = os.path.join(data_dir, "2018/07/31/IMG_7409_QVk2Yyt-adjusted.JPG")
+        adjusted_wrong_path = os.path.join(data_dir, "2018/07/31/IMG_7409-adjusted.JPG")
+
+        # FIXED: icloudpd now recognizes IMG_7409_QVk2Yyt-adjusted.JPG exists
+        self.assertIn(
+            "IMG_7409_QVk2Yyt-adjusted.JPG already exists",
+            result.output,
+            "icloudpd should recognize file with UUID already exists"
+        )
+
+        # Verify no wrong file was created
+        self.assertFalse(
+            os.path.exists(adjusted_wrong_path),
+            f"icloudpd should not create {adjusted_wrong_path} when {adjusted_correct_path} exists"
+        )
+
+    def test_no_redownload_with_uuid_filenames_name_id7(self) -> None:
+        """Test that files with UUIDs are not re-downloaded when using name-id7.
+
+        FIXED: Files with UUID naming (IMG_NNNN_UUID-adjusted.JPG) are now correctly
+        recognized and not re-downloaded, even when adjusted doesn't exist in iCloud
+        and would fallback to original.
+        """
+        base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])
+
+        # Pre-create file with correct UUID naming for adjusted
+        # When adjusted doesn't exist in iCloud, it would normally fallback to original
+        # But if a file with the correct adjusted name already exists, it should be recognized
+        files_to_create = [
+            ("2018/07/31", "IMG_7409_QVk2Yyt-adjusted.JPG", 1151066),  # adjusted with UUID
+        ]
+
+        # No files should be downloaded - adjusted file exists (FIXED!)
+        files_to_download: List[Tuple[str, str]] = []
+
+        data_dir, result = run_icloudpd_test(
+            self.assertEqual,
+            self.root_path,
+            base_dir,
+            "listing_photos_fallback_to_original.yml",
+            files_to_create,
+            files_to_download,
+            [
+                "--username",
+                "jdoe@gmail.com",
+                "--password",
+                "password1",
+                "--recent",
+                "1",
+                "--size",
+                "adjusted",
+                "--skip-live-photos",
+                "--no-progress-bar",
+                "--threads-num",
+                "1",
+                "--file-match-policy",
+                "name-id7",
+            ],
+        )
+
+        assert result.exit_code == 0
+
+        # FIXED: adjusted file with UUID is now recognized even when it doesn't exist in iCloud
+        self.assertIn(
+            "IMG_7409_QVk2Yyt-adjusted.JPG already exists",
+            result.output,
+            "Adjusted file with UUID should be recognized as existing"
+        )
+
+        # Verify no downloads happened
+        self.assertNotIn(
+            "Downloaded",
+            result.output,
+            "No files should be downloaded when adjusted file with UUID already exists"
+        )
