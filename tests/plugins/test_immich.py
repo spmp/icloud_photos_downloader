@@ -449,6 +449,59 @@ class TestImmichPluginHooks(unittest.TestCase):
         self.assertEqual(len(self.plugin.current_photo_files), 1)
         self.assertEqual(self.plugin.current_photo_files[0]['status'], 'existed')
 
+    def test_on_download_exists_with_process_existing_favorites_favorite_photo(self):
+        """Test on_download_exists with process_existing_favorites for favorite photo"""
+        self.plugin.process_existing_favorites = True
+
+        # Create mock photo that IS a favorite
+        photo = Mock(spec=PhotoAsset)
+        photo._asset_record = {
+            "fields": {
+                "isFavorite": {"value": 1}
+            }
+        }
+
+        download_size = Mock()
+        download_size.value = 'adjusted'
+
+        self.plugin.on_download_exists(
+            download_path='/photos/IMG_001.jpg',
+            photo_filename='IMG_001.jpg',
+            download_size=download_size,
+            photo=photo,
+            dry_run=False
+        )
+
+        # Should add to current_photo_files because photo is favorite
+        self.assertEqual(len(self.plugin.current_photo_files), 1)
+        self.assertEqual(self.plugin.current_photo_files[0]['status'], 'existed')
+
+    def test_on_download_exists_with_process_existing_favorites_non_favorite_photo(self):
+        """Test on_download_exists with process_existing_favorites for non-favorite photo"""
+        self.plugin.process_existing_favorites = True
+
+        # Create mock photo that is NOT a favorite
+        photo = Mock(spec=PhotoAsset)
+        photo._asset_record = {
+            "fields": {
+                "isFavorite": {"value": 0}
+            }
+        }
+
+        download_size = Mock()
+        download_size.value = 'adjusted'
+
+        self.plugin.on_download_exists(
+            download_path='/photos/IMG_001.jpg',
+            photo_filename='IMG_001.jpg',
+            download_size=download_size,
+            photo=photo,
+            dry_run=False
+        )
+
+        # Should NOT add to current_photo_files because photo is not favorite
+        self.assertEqual(len(self.plugin.current_photo_files), 0)
+
     def test_on_download_downloaded(self):
         """Test on_download_downloaded hook"""
         photo = Mock(spec=PhotoAsset)

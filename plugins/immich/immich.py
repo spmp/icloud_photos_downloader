@@ -205,6 +205,7 @@ class ImmichPlugin(IcloudpdPlugin):
         self.api_key: str | None = None
         self.library_id: str | None = None
         self.process_existing: bool = False
+        self.process_existing_favorites: bool = False
         self.scan_timeout: float = 5.0
         self.poll_interval: float = 1.0
 
@@ -285,6 +286,13 @@ class ImmichPlugin(IcloudpdPlugin):
             '--immich-process-existing',
             action='store_true',
             help='Process files that already existed (in addition to newly downloaded files)'
+        )
+
+        group.add_argument(
+            '--immich-process-existing-favorites',
+            action='store_true',
+            help='Process only existing files that are marked as favorites in iCloud '
+                 '(useful for updating favorite status after initial download)'
         )
 
         group.add_argument(
@@ -374,6 +382,7 @@ class ImmichPlugin(IcloudpdPlugin):
         self.api_key = getattr(config, 'immich_api_key', None)
         self.library_id = getattr(config, 'immich_library_id', None)
         self.process_existing = getattr(config, 'immich_process_existing', False)
+        self.process_existing_favorites = getattr(config, 'immich_process_existing_favorites', False)
         self.scan_timeout = getattr(config, 'immich_scan_timeout', 5.0)
         self.poll_interval = getattr(config, 'immich_poll_interval', 1.0)
 
@@ -425,23 +434,31 @@ class ImmichPlugin(IcloudpdPlugin):
         if not self.library_id:
             print("Error: Immich library ID is required (--immich-library-id)", file=sys.stderr)
             sys.exit(1)
+        if self.process_existing and self.process_existing_favorites:
+            print("Error: Cannot use both --immich-process-existing and --immich-process-existing-favorites", file=sys.stderr)
+            print("Choose one: process all existing files OR only existing favorites", file=sys.stderr)
+            sys.exit(1)
+        if self.process_existing_favorites and not self.favorite_sizes:
+            print("Warning: --immich-process-existing-favorites is enabled but no favorite sizes configured", file=sys.stderr)
+            print("Add --immich-favorite to specify which sizes to mark as favorites in Immich", file=sys.stderr)
 
         # Print configuration (using print since logger isn't configured yet)
         print("\n" + "=" * 70)
         print("Immich Plugin: Initialized")
         print("=" * 70)
-        print(f"  Version:           {self.version}")
-        print(f"  Server URL:        {self.server_url}")
-        print(f"  Library ID:        {self.library_id}")
-        print(f"  Process Existing:  {self.process_existing}")
-        print(f"  Scan Timeout:      {self.scan_timeout}s")
-        print(f"  Poll interval:     {self.poll_interval}s")
-        print(f"  Stack Media:       {self.stack_media}")
+        print(f"  Version:                  {self.version}")
+        print(f"  Server URL:               {self.server_url}")
+        print(f"  Library ID:               {self.library_id}")
+        print(f"  Process Existing:         {self.process_existing}")
+        print(f"  Process Existing Favs:    {self.process_existing_favorites}")
+        print(f"  Scan Timeout:             {self.scan_timeout}s")
+        print(f"  Poll interval:            {self.poll_interval}s")
+        print(f"  Stack Media:              {self.stack_media}")
         if self.stack_media:
-            print(f"  Stack Priority:    {', '.join(self.stack_priority)}")
-        print(f"  Favorite Sizes:    {', '.join(self.favorite_sizes) if self.favorite_sizes else 'None'}")
-        print(f"  Live Association:  {', '.join(self.associate_live_sizes) if self.associate_live_sizes else 'None'}")
-        print(f"  Album Rules:       {len(self.album_rules)}")
+            print(f"  Stack Priority:           {', '.join(self.stack_priority)}")
+        print(f"  Favorite Sizes:           {', '.join(self.favorite_sizes) if self.favorite_sizes else 'None'}")
+        print(f"  Live Association:         {', '.join(self.associate_live_sizes) if self.associate_live_sizes else 'None'}")
+        print(f"  Album Rules:              {len(self.album_rules)}")
         for rule in self.album_rules:
             print(f"    - {rule}")
         print("=" * 70 + "\n")
@@ -608,7 +625,22 @@ class ImmichPlugin(IcloudpdPlugin):
         dry_run: bool,
     ) -> None:
         """File already exists - add to accumulator if process_existing is enabled"""
+        # Check if we should process this existing file
+        should_process = False
+
         if self.process_existing:
+            # Process all existing files
+            should_process = True
+        elif self.process_existing_favorites:
+            # Only process if photo is marked as favorite in iCloud
+            is_favorite = photo._asset_record.get("fields", {}).get("isFavorite", {}).get("value") == 1
+            if is_favorite:
+                should_process = True
+                logger.debug(f"Immich: Photo is favorite, will process existing file")
+            else:
+                logger.debug(f"Immich: Photo is not favorite, skipping existing file")
+
+        if should_process:
             logger.debug(f"Immich: Accumulating existing file {download_size.value} - {download_path}")
             self.current_photo_files.append({
                 'status': 'existed',
@@ -618,7 +650,7 @@ class ImmichPlugin(IcloudpdPlugin):
                 'photo_filename': photo_filename,
             })
         else:
-            logger.debug("Immich: Skipping existing file (process_existing=False)")
+            logger.debug("Immich: Skipping existing file (not configured to process)")
 
     def on_download_downloaded(
         self,
