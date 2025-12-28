@@ -31,7 +31,9 @@ Live Photos:
 """
 
 import argparse
+import json
 import logging
+import os
 import re
 import sys
 import time
@@ -87,6 +89,40 @@ def _parse_sizes(value: str | None) -> List[str]:
         )
 
     return items
+
+
+def _parse_batch_size(value: str | None) -> int | str:
+    """Parse batch size argument.
+
+    Args:
+        value: Batch size value - None, 'all', or an integer string
+
+    Returns:
+        'all' or integer batch size
+
+    Raises:
+        argparse.ArgumentTypeError: If invalid value
+    """
+    # No argument (--immich-batch-process with no value) → process all at end
+    if value is None:
+        return 'all'
+
+    # Explicit 'all'
+    if value.lower() == 'all':
+        return 'all'
+
+    # Try to parse as integer
+    try:
+        batch_size = int(value)
+        if batch_size < 1:
+            raise argparse.ArgumentTypeError(
+                f"Batch size must be >= 1, got {batch_size}"
+            )
+        return batch_size
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"Invalid batch size: {value}. Use 'all' or a positive integer"
+        )
 
 
 # ============================================================================
@@ -209,6 +245,11 @@ class ImmichPlugin(IcloudpdPlugin):
         self.scan_timeout: float = 5.0
         self.poll_interval: float = 1.0
 
+        # Batch processing configuration
+        self.batch_process_enabled: bool = False
+        self.batch_size: int | str = 1  # Default: process each photo immediately (batch of 1)
+        self.batch_log_file: str = os.path.expanduser('~/.pyicloud/immich_pending_files.json')
+
         # Stacking configuration
         self.stack_media: bool = False
         self.stack_priority: List[str] = ['adjusted', 'medium', 'original']
@@ -232,6 +273,10 @@ class ImmichPlugin(IcloudpdPlugin):
 
         # Track which asset has the original live photo video (for association with other sizes)
         self.live_photo_filename: str | None = None
+
+        # Batch queue for accumulating photos before processing
+        # Each entry: {'photo_id': str, 'files': List[Dict], 'is_favorite': bool, 'created': datetime, ...}
+        self.batch_queue: List[Dict[str, Any]] = []
 
         # Global counters for the run
         self.total_photos = 0
@@ -356,6 +401,27 @@ class ImmichPlugin(IcloudpdPlugin):
             help='Time to wait for between polls post scan. (default: %(default)s)'
         )
 
+        group.add_argument(
+            '--immich-batch-process',
+            nargs='?',
+            const=None,
+            default=False,
+            type=_parse_batch_size,
+            metavar='N|all',
+            help='Batch process photos to reduce Immich server load. '
+                 'No argument or "all": process all at end. '
+                 'Integer N: process every N photos. '
+                 'Reduces library scan frequency by accumulating photos before processing. '
+                 'Default: disabled (process each photo immediately)'
+        )
+
+        group.add_argument(
+            '--immich-batch-log-file',
+            metavar='PATH',
+            help='Path to batch processing log file for crash recovery '
+                 '(default: ~/.pyicloud/immich_pending_files.json)'
+        )
+
     # ========================================================================
     # Plugin Configuration
     # ========================================================================
@@ -385,6 +451,17 @@ class ImmichPlugin(IcloudpdPlugin):
         self.process_existing_favorites = getattr(config, 'immich_process_existing_favorites', False)
         self.scan_timeout = getattr(config, 'immich_scan_timeout', 5.0)
         self.poll_interval = getattr(config, 'immich_poll_interval', 1.0)
+
+        # Batch processing configuration
+        batch_arg = getattr(config, 'immich_batch_process', False)
+        if batch_arg is not False:
+            self.batch_process_enabled = True
+            self.batch_size = batch_arg  # Will be 'all' or integer N
+
+        # Batch log file
+        batch_log_file_arg = getattr(config, 'immich_batch_log_file', None)
+        if batch_log_file_arg:
+            self.batch_log_file = batch_log_file_arg
 
         # Parse stack_media argument (False, None=all, or list of sizes)
         stack_arg = getattr(config, 'immich_stack_media', False)
@@ -451,6 +528,10 @@ class ImmichPlugin(IcloudpdPlugin):
         print(f"  Library ID:               {self.library_id}")
         print(f"  Process Existing:         {self.process_existing}")
         print(f"  Process Existing Favs:    {self.process_existing_favorites}")
+        print(f"  Batch Processing:         {self.batch_process_enabled}")
+        if self.batch_process_enabled:
+            print(f"  Batch Size:               {self.batch_size}")
+            print(f"  Batch Log File:           {self.batch_log_file}")
         print(f"  Scan Timeout:             {self.scan_timeout}s")
         print(f"  Poll interval:            {self.poll_interval}s")
         print(f"  Stack Media:              {self.stack_media}")
@@ -470,6 +551,10 @@ class ImmichPlugin(IcloudpdPlugin):
             # Validate directories when user_configs are available (second call from base.py)
             if user_configs is not None:
                 self._validate_directories(user_configs)
+
+        # Load pending files from previous run if batch processing is enabled
+        if self.batch_process_enabled:
+            self._load_pending_files()
 
 
     @staticmethod
@@ -1014,7 +1099,11 @@ class ImmichPlugin(IcloudpdPlugin):
     ) -> None:
         """Process all accumulated files after all sizes are downloaded.
 
-        Workflow:
+        With batch processing enabled, files are accumulated to batch queue instead
+        of being processed immediately. Processing happens when batch size is reached
+        or at end of run (on_run_completed).
+
+        Without batch processing (default), workflow:
         1. If all files existed (not downloaded), check if assets already registered
            - If all assets found, skip library scan (optimization)
            - If any assets missing, trigger scan
@@ -1035,13 +1124,34 @@ class ImmichPlugin(IcloudpdPlugin):
         assert self.api_key is not None
         assert self.library_id is not None
 
-        self.total_photos += 1
-
         # Skip if no files to process
         if not self.current_photo_files:
             logger.debug(f"Immich: No files to process for {photo.filename}")
             return
 
+        # BATCH PROCESSING MODE: Accumulate instead of processing immediately
+        if self.batch_process_enabled:
+            logger.info(f"Immich: Accumulating {photo.filename} to batch ({len(self.current_photo_files)} files)")
+
+            # Dry run mode - just log and clear
+            if dry_run:
+                for file_info in self.current_photo_files:
+                    logger.info(f"  [DRY RUN] Would accumulate {file_info['size']}: {file_info['path']}")
+                self.current_photo_files.clear()
+                return
+
+            # Accumulate to batch queue
+            self._accumulate_to_batch(photo)
+
+            # Check if batch is ready to process
+            if self._should_process_batch():
+                logger.info(f"Batch size ({self.batch_size}) reached, processing batch now")
+                self._process_batch()
+
+            return
+
+        # IMMEDIATE PROCESSING MODE (original behavior)
+        self.total_photos += 1
         logger.info(f"Immich: Processing {photo.filename} ({len(self.current_photo_files)} files)")
 
         # Dry run mode - just log and clear
@@ -1285,11 +1395,235 @@ class ImmichPlugin(IcloudpdPlugin):
                 sys.exit(1)
 
     # ========================================================================
+    # Batch Processing Methods
+    # ========================================================================
+
+    def _load_pending_files(self) -> None:
+        """Load pending files from batch log file (for crash recovery).
+
+        Called during plugin initialization if batch processing is enabled.
+        Loads any unprocessed photos from a previous run that was interrupted.
+        """
+        if not os.path.exists(self.batch_log_file):
+            logger.debug(f"No pending batch file found at {self.batch_log_file}")
+            return
+
+        try:
+            with open(self.batch_log_file, 'r') as f:
+                pending_data = json.load(f)
+
+            if pending_data:
+                self.batch_queue = pending_data
+                logger.info(f"Loaded {len(self.batch_queue)} pending photos from previous run")
+                logger.info(f"These will be processed first before new photos")
+            else:
+                logger.debug("Pending batch file is empty")
+
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Failed to load pending batch file: {e}")
+            logger.warning("Starting with empty batch queue")
+            self.batch_queue = []
+
+    def _save_pending_files(self) -> None:
+        """Save current batch queue to disk for crash recovery.
+
+        Writes the batch queue to a JSON file so that if the process crashes,
+        we can resume from where we left off on the next run.
+        """
+        try:
+            # Create directory if it doesn't exist
+            log_dir = os.path.dirname(self.batch_log_file)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+
+            with open(self.batch_log_file, 'w') as f:
+                json.dump(self.batch_queue, f, indent=2, default=str)
+
+            logger.debug(f"Saved {len(self.batch_queue)} pending photos to {self.batch_log_file}")
+
+        except (IOError, OSError) as e:
+            logger.error(f"Failed to save pending batch file: {e}")
+            logger.error("Progress may be lost if process is interrupted")
+
+    def _clear_processed_from_log(self, photo_ids: List[str]) -> None:
+        """Remove successfully processed photos from batch queue and update log file.
+
+        Args:
+            photo_ids: List of photo IDs that were successfully processed
+        """
+        # Remove processed photos from batch queue
+        self.batch_queue = [
+            item for item in self.batch_queue
+            if item['photo_id'] not in photo_ids
+        ]
+
+        # Update log file
+        self._save_pending_files()
+
+        logger.debug(f"Cleared {len(photo_ids)} processed photos from batch log")
+
+    def _accumulate_to_batch(self, photo: PhotoAsset) -> None:
+        """Add current photo and its files to the batch queue.
+
+        Args:
+            photo: PhotoAsset with metadata needed for processing later
+        """
+        if not self.current_photo_files:
+            logger.debug(f"No files to accumulate for {photo.id}")
+            return
+
+        # Extract necessary metadata from photo for later processing
+        is_favorite = photo._asset_record.get("fields", {}).get("isFavorite", {}).get("value") == 1
+
+        # Build batch item
+        batch_item = {
+            'photo_id': photo.id,
+            'files': self.current_photo_files.copy(),  # Copy the file list
+            'is_favorite': is_favorite,
+            'created': photo.created.isoformat() if hasattr(photo.created, 'isoformat') else str(photo.created),
+            'filename': photo.filename,
+        }
+
+        self.batch_queue.append(batch_item)
+        logger.debug(f"Added photo {photo.id} to batch queue ({len(self.batch_queue)} total)")
+
+        # Save to disk for crash recovery
+        self._save_pending_files()
+
+        # Clear current photo files for next photo
+        self.current_photo_files.clear()
+
+    def _should_process_batch(self) -> bool:
+        """Check if batch should be processed now.
+
+        Returns:
+            True if batch is ready to process, False otherwise
+        """
+        # If batch_size is 'all', never process until on_run_completed
+        if self.batch_size == 'all':
+            return False
+
+        # Otherwise check if we've accumulated enough photos
+        return len(self.batch_queue) >= self.batch_size
+
+    def _process_batch(self) -> None:
+        """Process all photos in the current batch queue.
+
+        This performs the same operations as on_download_all_sizes_complete
+        but for multiple photos at once, triggering library scan only once
+        per batch instead of once per photo.
+        """
+        if not self.batch_queue:
+            logger.debug("Batch queue is empty, nothing to process")
+            return
+
+        logger.info(f"Processing batch of {len(self.batch_queue)} photos")
+
+        # Collect all files from all photos in batch
+        all_files_to_register = []
+        photo_metadata = []  # Keep metadata for post-processing
+
+        for batch_item in self.batch_queue:
+            all_files_to_register.extend(batch_item['files'])
+            photo_metadata.append(batch_item)
+
+        if not all_files_to_register:
+            logger.info("No files to register in batch")
+            self._clear_processed_from_log([item['photo_id'] for item in self.batch_queue])
+            return
+
+        logger.info(f"Triggering library scan for {len(all_files_to_register)} files")
+
+        # Trigger library scan once for entire batch
+        try:
+            self._trigger_library_scan(self.library_id)
+        except requests.RequestException as e:
+            logger.error(f"FATAL: Failed to trigger library scan: {e}")
+            sys.exit(1)
+
+        # Wait for all files to appear in Immich
+        try:
+            found_assets = self._wait_for_assets(
+                expected_files=all_files_to_register,
+                timeout=self.scan_timeout
+            )
+        except SystemExit:
+            raise  # Timeout - exit icloudpd
+
+        # Process each photo's assets (stacking, favoriting, albums)
+        successfully_processed = []
+
+        for batch_item in photo_metadata:
+            photo_id = batch_item['photo_id']
+            photo_files = batch_item['files']
+
+            # Build current_immich_assets for this photo
+            self.current_immich_assets = []
+
+            for file_info in photo_files:
+                path = file_info['path']
+                asset = found_assets.get(path)
+
+                if not asset:
+                    logger.error(f"Asset not found for {path} after scan (photo {photo_id})")
+                    continue
+
+                live_photo_video_id = asset.get('livePhotoVideoId')
+
+                self.current_immich_assets.append({
+                    'size': file_info['size'],
+                    'asset_id': asset.get('id'),
+                    'path': path,
+                    'live_photo_video_id': live_photo_video_id,
+                })
+
+                logger.info(f"  Registered {file_info['size']} for {photo_id}: {asset.get('id')}")
+                self.total_registered += 1
+
+            # Skip post-processing if no assets were registered
+            if not self.current_immich_assets:
+                logger.warning(f"No assets registered for photo {photo_id}, skipping post-processing")
+                continue
+
+            # Stack size variants (if enabled)
+            if self.stack_media:
+                self._stack_size_variants()
+
+            # Mark favorites (if enabled and photo is favorite)
+            if self.favorite_sizes and batch_item['is_favorite']:
+                self._mark_favorites()
+
+            # Apply album rules (need to reconstruct minimal photo object)
+            if self.album_rules:
+                # Create a minimal mock photo object with just the metadata we need
+                from datetime import datetime
+                mock_photo = type('PhotoAsset', (), {
+                    'created': datetime.fromisoformat(batch_item['created']) if isinstance(batch_item['created'], str) else batch_item['created'],
+                    'filename': batch_item.get('filename', ''),
+                })()
+                self._apply_album_rules(mock_photo)
+
+            # Clear for next photo
+            self.current_immich_assets.clear()
+            self.total_photos += 1
+            successfully_processed.append(photo_id)
+
+        # Clear processed photos from log
+        self._clear_processed_from_log(successfully_processed)
+
+        logger.info(f"Batch processing complete: {len(successfully_processed)} photos processed")
+
+    # ========================================================================
     # Run Complete Hook
     # ========================================================================
 
     def on_run_completed(self, dry_run: bool) -> None:
-        """Run complete - show final summary"""
+        """Run complete - process any remaining batch and show final summary"""
+        # Process any remaining photos in batch queue
+        if self.batch_process_enabled and self.batch_queue:
+            logger.info(f"Processing remaining batch of {len(self.batch_queue)} photos")
+            self._process_batch()
+
         logger.info("=" * 70)
         logger.info("Immich Plugin: Run Completed")
         logger.info("=" * 70)

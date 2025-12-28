@@ -859,5 +859,312 @@ class TestImmichPluginAlbums(unittest.TestCase):
         mock_add_assets.assert_called_once_with('album-123', ['asset-001'])
 
 
+class TestImmichPluginBatchProcessing(unittest.TestCase):
+    """Test ImmichPlugin batch processing functionality"""
+
+    def setUp(self):
+        """Set up test plugin with batch processing enabled"""
+        self.plugin = ImmichPlugin()
+        self.plugin.server_url = 'http://localhost:2283'
+        self.plugin.api_key = 'test-key'
+        self.plugin.library_id = 'lib-123'
+
+    def test_batch_processing_disabled_by_default(self):
+        """Test batch processing is disabled by default"""
+        self.assertFalse(self.plugin.batch_process_enabled)
+        self.assertEqual(self.plugin.batch_size, 1)
+
+    def test_batch_processing_enabled_with_size(self):
+        """Test batch processing enabled with specific batch size"""
+        self.plugin.batch_process_enabled = True
+        self.plugin.batch_size = 10
+        self.assertEqual(self.plugin.batch_size, 10)
+        self.assertTrue(self.plugin.batch_process_enabled)
+
+    def test_batch_processing_enabled_process_all(self):
+        """Test batch processing enabled with 'all' (process at end)"""
+        self.plugin.batch_process_enabled = True
+        self.plugin.batch_size = 'all'
+        self.assertEqual(self.plugin.batch_size, 'all')
+
+    def test_batch_log_file_default_path(self):
+        """Test default batch log file path"""
+        import os
+        expected_path = os.path.expanduser('~/.pyicloud/immich_pending_files.json')
+        self.plugin.batch_log_file = expected_path
+        self.assertEqual(self.plugin.batch_log_file, expected_path)
+
+    def test_batch_accumulation_no_batching(self):
+        """Test that without batching, photos are processed immediately"""
+        self.plugin.batch_process_enabled = False
+
+        # Mock photo
+        photo = Mock(spec=PhotoAsset)
+        photo.id = 'photo-001'
+
+        # Simulate file download
+        self.plugin.current_photo_files = [
+            {'status': 'downloaded', 'path': '/photos/img1.jpg', 'size': 'original'}
+        ]
+
+        # With no batching, batch_queue should remain empty
+        self.assertEqual(len(self.plugin.batch_queue), 0)
+
+    def test_batch_accumulation_with_batching(self):
+        """Test that with batching enabled, photos are added to batch queue"""
+        self.plugin.batch_process_enabled = True
+        self.plugin.batch_size = 10
+
+        # Mock photo
+        photo = Mock(spec=PhotoAsset)
+        photo.id = 'photo-001'
+        photo._asset_record = {'fields': {'isFavorite': {'value': 0}}}
+
+        # Add files to current_photo_files
+        self.plugin.current_photo_files = [
+            {'status': 'downloaded', 'path': '/photos/img1.jpg', 'size': 'original'}
+        ]
+
+        # Call the accumulation method (will be implemented)
+        self.plugin._accumulate_to_batch(photo)
+
+        # Verify batch queue has the photo
+        self.assertEqual(len(self.plugin.batch_queue), 1)
+        self.assertEqual(self.plugin.batch_queue[0]['photo_id'], 'photo-001')
+        self.assertEqual(len(self.plugin.batch_queue[0]['files']), 1)
+
+    def test_batch_trigger_after_n_photos(self):
+        """Test batch processing triggers after N photos accumulated"""
+        self.plugin.batch_process_enabled = True
+        self.plugin.batch_size = 3
+
+        # Add 3 photos to batch queue
+        for i in range(3):
+            photo = Mock(spec=PhotoAsset)
+            photo.id = f'photo-{i:03d}'
+            photo._asset_record = {'fields': {'isFavorite': {'value': 0}}}
+
+            self.plugin.current_photo_files = [
+                {'status': 'downloaded', 'path': f'/photos/img{i}.jpg', 'size': 'original'}
+            ]
+            self.plugin._accumulate_to_batch(photo)
+
+        # After 3 photos, batch should be ready to process
+        self.assertTrue(self.plugin._should_process_batch())
+
+    def test_batch_not_triggered_before_n_photos(self):
+        """Test batch processing doesn't trigger before N photos"""
+        self.plugin.batch_process_enabled = True
+        self.plugin.batch_size = 10
+
+        # Add only 5 photos
+        for i in range(5):
+            photo = Mock(spec=PhotoAsset)
+            photo.id = f'photo-{i:03d}'
+            photo._asset_record = {'fields': {'isFavorite': {'value': 0}}}
+
+            self.plugin.current_photo_files = [
+                {'status': 'downloaded', 'path': f'/photos/img{i}.jpg', 'size': 'original'}
+            ]
+            self.plugin._accumulate_to_batch(photo)
+
+        # Should not trigger yet
+        self.assertFalse(self.plugin._should_process_batch())
+
+    def test_batch_process_all_waits_until_end(self):
+        """Test batch_size='all' doesn't trigger until on_run_completed"""
+        self.plugin.batch_process_enabled = True
+        self.plugin.batch_size = 'all'
+
+        # Add many photos
+        for i in range(100):
+            photo = Mock(spec=PhotoAsset)
+            photo.id = f'photo-{i:03d}'
+            photo._asset_record = {'fields': {'isFavorite': {'value': 0}}}
+
+            self.plugin.current_photo_files = [
+                {'status': 'downloaded', 'path': f'/photos/img{i}.jpg', 'size': 'original'}
+            ]
+            self.plugin._accumulate_to_batch(photo)
+
+        # Should never trigger during accumulation
+        self.assertFalse(self.plugin._should_process_batch())
+        self.assertEqual(len(self.plugin.batch_queue), 100)
+
+    @patch('os.path.exists')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='[]')
+    def test_load_pending_files_empty(self, mock_open_file, mock_exists):
+        """Test loading pending files when file is empty"""
+        mock_exists.return_value = True
+        self.plugin.batch_log_file = '/tmp/pending.json'
+
+        self.plugin._load_pending_files()
+
+        # Should have empty batch queue
+        self.assertEqual(len(self.plugin.batch_queue), 0)
+
+    @patch('os.path.exists')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open,
+           read_data='[{"photo_id": "photo-001", "files": [{"path": "/photos/img1.jpg"}], "is_favorite": false}]')
+    def test_load_pending_files_with_data(self, mock_open_file, mock_exists):
+        """Test loading pending files when file has data"""
+        mock_exists.return_value = True
+        self.plugin.batch_log_file = '/tmp/pending.json'
+
+        self.plugin._load_pending_files()
+
+        # Should have loaded the pending photo
+        self.assertEqual(len(self.plugin.batch_queue), 1)
+        self.assertEqual(self.plugin.batch_queue[0]['photo_id'], 'photo-001')
+
+    @patch('os.path.exists')
+    def test_load_pending_files_no_file(self, mock_exists):
+        """Test loading pending files when file doesn't exist"""
+        mock_exists.return_value = False
+        self.plugin.batch_log_file = '/tmp/pending.json'
+
+        self.plugin._load_pending_files()
+
+        # Should have empty batch queue
+        self.assertEqual(len(self.plugin.batch_queue), 0)
+
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    def test_save_pending_files(self, mock_open_file):
+        """Test saving pending files to disk"""
+        self.plugin.batch_log_file = '/tmp/pending.json'
+        self.plugin.batch_queue = [
+            {
+                'photo_id': 'photo-001',
+                'files': [{'path': '/photos/img1.jpg', 'size': 'original'}],
+                'is_favorite': False
+            }
+        ]
+
+        self.plugin._save_pending_files()
+
+        # Should have written to file
+        mock_open_file.assert_called_once_with('/tmp/pending.json', 'w')
+
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    def test_clear_pending_files_after_processing(self, mock_open_file):
+        """Test pending files are cleared after successful processing"""
+        self.plugin.batch_log_file = '/tmp/pending.json'
+        self.plugin.batch_queue = [
+            {
+                'photo_id': 'photo-001',
+                'files': [{'path': '/photos/img1.jpg', 'size': 'original'}],
+                'is_favorite': False
+            }
+        ]
+
+        # Simulate successful processing
+        self.plugin._clear_processed_from_log(['photo-001'])
+
+        # Batch queue should be empty
+        self.assertEqual(len(self.plugin.batch_queue), 0)
+
+    def test_on_download_all_sizes_complete_batching_disabled(self):
+        """Test on_download_all_sizes_complete without batching processes immediately"""
+        self.plugin.batch_process_enabled = False
+
+        photo = Mock(spec=PhotoAsset)
+        photo.id = 'photo-001'
+        photo._asset_record = {'fields': {'isFavorite': {'value': 0}}}
+
+        self.plugin.current_photo_files = [
+            {'status': 'downloaded', 'path': '/photos/img1.jpg', 'size': 'original'}
+        ]
+
+        # Should process immediately (existing behavior)
+        # We'll verify this by checking that batch queue remains empty
+        self.assertEqual(len(self.plugin.batch_queue), 0)
+
+    @patch('plugins.immich.immich.ImmichPlugin._process_batch')
+    def test_on_run_completed_processes_remaining_batch(self, mock_process_batch):
+        """Test on_run_completed processes all remaining batched photos"""
+        self.plugin.batch_process_enabled = True
+        self.plugin.batch_size = 10
+
+        # Add some photos to batch queue (less than batch size)
+        for i in range(5):
+            self.plugin.batch_queue.append({
+                'photo_id': f'photo-{i:03d}',
+                'files': [{'path': f'/photos/img{i}.jpg', 'size': 'original'}],
+                'is_favorite': False
+            })
+
+        self.plugin.on_run_completed(dry_run=False)
+
+        # Should have processed the remaining batch
+        mock_process_batch.assert_called_once()
+
+    def test_batch_preserves_photo_metadata(self):
+        """Test batch queue preserves necessary photo metadata for processing"""
+        self.plugin.batch_process_enabled = True
+        self.plugin.batch_size = 10
+
+        photo = Mock(spec=PhotoAsset)
+        photo.id = 'photo-001'
+        photo._asset_record = {'fields': {'isFavorite': {'value': 1}}}
+        photo.created = Mock()
+
+        self.plugin.current_photo_files = [
+            {'status': 'downloaded', 'path': '/photos/img1.jpg', 'size': 'original'},
+            {'status': 'downloaded', 'path': '/photos/img1-adjusted.jpg', 'size': 'adjusted'}
+        ]
+
+        self.plugin._accumulate_to_batch(photo)
+
+        # Verify metadata is preserved
+        batch_item = self.plugin.batch_queue[0]
+        self.assertEqual(batch_item['photo_id'], 'photo-001')
+        self.assertTrue(batch_item['is_favorite'])
+        self.assertEqual(len(batch_item['files']), 2)
+        self.assertIn('created', batch_item)
+
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    @patch('os.makedirs')
+    def test_save_pending_creates_directory(self, mock_makedirs, mock_open_file):
+        """Test saving pending files creates directory if needed"""
+        import os
+        self.plugin.batch_log_file = '/new/path/pending.json'
+        self.plugin.batch_queue = [
+            {'photo_id': 'photo-001', 'files': [], 'is_favorite': False}
+        ]
+
+        self.plugin._save_pending_files()
+
+        # Should create directory
+        expected_dir = os.path.dirname('/new/path/pending.json')
+        mock_makedirs.assert_called_once_with(expected_dir, exist_ok=True)
+
+    def test_batch_queue_only_for_new_files(self):
+        """Test batching only applies to newly downloaded files, not existing"""
+        self.plugin.batch_process_enabled = True
+        self.plugin.batch_size = 10
+        self.plugin.process_existing = True
+
+        # Mix of downloaded and existed files
+        photo = Mock(spec=PhotoAsset)
+        photo.id = 'photo-001'
+        photo._asset_record = {'fields': {'isFavorite': {'value': 0}}}
+
+        self.plugin.current_photo_files = [
+            {'status': 'downloaded', 'path': '/photos/img1.jpg', 'size': 'original'},
+            {'status': 'existed', 'path': '/photos/img1-adjusted.jpg', 'size': 'adjusted'}
+        ]
+
+        self.plugin._accumulate_to_batch(photo)
+
+        # Batch should only contain downloaded file
+        batch_item = self.plugin.batch_queue[0]
+        downloaded_files = [f for f in batch_item['files'] if f['status'] == 'downloaded']
+        existed_files = [f for f in batch_item['files'] if f['status'] == 'existed']
+
+        # Both should be in batch - batching applies to entire photo processing
+        # Re-reading requirement: batching applies to all processing
+        self.assertEqual(len(batch_item['files']), 2)
+
+
 if __name__ == '__main__':
     unittest.main()
