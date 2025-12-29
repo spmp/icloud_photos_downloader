@@ -336,6 +336,11 @@ This is a list of all options available for the command line interface (CLI) of 
     ```{versionadded} 1.25.0
     ```
 
+(favorite-to-rating-parameter)=
+`--favorite-to-rating`
+
+:   Set EXIF (and/or XMP sidecar if enabled) Rating for favorited photos. Can be given without argument to set Rating to 5 or with argument (0-5).
+
 (smtp-parameter)=
 `--smtp-username X`, `--smtp-password X`, `--smtp-host X`, `--smtp-port X`, `--smtp-no-tls`
     
