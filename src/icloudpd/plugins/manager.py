@@ -28,15 +28,15 @@ logger = logging.getLogger(__name__)
 
 class PluginManager:
     """Manages plugin discovery, loading, and hook dispatching.
-    
+
     Usage:
         >>> manager = PluginManager()
         >>> manager.discover()  # Find all installed plugins
         >>> print(manager.list_available())  # ['demo', 'immich', ...]
-        >>> manager.enable('demo', config)  # Enable a plugin
-        >>> manager.call_hook('on_photo_downloaded', ...)  # Call hooks
+        >>> manager.enable("demo", config)  # Enable a plugin
+        >>> manager.call_hook("on_photo_downloaded", ...)  # Call hooks
     """
-    
+
     def __init__(self):
         """Initialize the plugin manager."""
         self.available: Dict[str, type] = {}  # name -> plugin class
@@ -45,7 +45,7 @@ class PluginManager:
         self.global_config: GlobalConfig | None = None  # Global configuration
         self.user_configs: Sequence[UserConfig] | None = None  # User configurations
         self._configured_plugins: set[str] = set()  # Track which plugins have been configured
-    
+
     def discover(self) -> None:
         """Discover plugins from bundled plugins/ directory and entry points.
 
@@ -64,7 +64,7 @@ class PluginManager:
         try:
             # Navigate from src/icloudpd/plugins/ up to project root
             project_root = Path(__file__).parent.parent.parent.parent
-            plugins_dir = project_root / 'plugins'
+            plugins_dir = project_root / "plugins"
 
             if plugins_dir.exists() and plugins_dir.is_dir():
                 self._discover_from_directory(plugins_dir)
@@ -73,12 +73,14 @@ class PluginManager:
 
         # 2. Discover from entry points
         try:
-            discovered_eps = entry_points(group='icloudpd.plugins')
+            discovered_eps = entry_points(group="icloudpd.plugins")
             for ep in discovered_eps:
                 try:
                     # Skip if already discovered from plugins/ directory (precedence)
                     if ep.name in self.available:
-                        logger.debug(f"Skipping entry point '{ep.name}' (already loaded from plugins/)")
+                        logger.debug(
+                            f"Skipping entry point '{ep.name}' (already loaded from plugins/)"
+                        )
                         continue
 
                     plugin_class = ep.load()
@@ -108,7 +110,7 @@ class PluginManager:
         # Scan for package directories
         for item in directory.iterdir():
             # Only process directories with __init__.py (packages)
-            if not item.is_dir() or not (item / '__init__.py').exists():
+            if not item.is_dir() or not (item / "__init__.py").exists():
                 continue
 
             plugin_package_name = item.name
@@ -137,7 +139,7 @@ class PluginManager:
                 continue
 
             # Must end with 'Plugin' by convention
-            if not name.endswith('Plugin'):
+            if not name.endswith("Plugin"):
                 continue
 
             # Create temporary instance to get plugin name
@@ -147,43 +149,47 @@ class PluginManager:
 
                 # Register the plugin class
                 self.available[plugin_name] = obj
-                logger.info(f"Discovered plugin: {plugin_name} (from {source_name}, v{temp_instance.version})")
+                logger.info(
+                    f"Discovered plugin: {plugin_name} (from {source_name}, v{temp_instance.version})"
+                )
 
             except Exception as e:
-                logger.warning(f"Failed to instantiate plugin class '{name}' from {source_name}: {e}")
+                logger.warning(
+                    f"Failed to instantiate plugin class '{name}' from {source_name}: {e}"
+                )
 
     def list_available(self) -> List[str]:
         """Get list of available plugin names.
-        
+
         Returns:
             List of plugin names that have been discovered
         """
         return sorted(self.available.keys())
-    
+
     def get_plugin_info(self, name: str) -> Dict[str, str]:
         """Get information about a plugin.
-        
+
         Args:
             name: Plugin name
-            
+
         Returns:
             Dictionary with 'name', 'version', 'description'
-            
+
         Raises:
             KeyError: If plugin not found
         """
         if name not in self.available:
             raise KeyError(f"Plugin '{name}' not found")
-        
+
         plugin_class = self.available[name]
         temp_instance = plugin_class()
-        
+
         return {
-            'name': temp_instance.name,
-            'version': temp_instance.version,
-            'description': temp_instance.description,
+            "name": temp_instance.name,
+            "version": temp_instance.version,
+            "description": temp_instance.description,
         }
-    
+
     def set_plugin_config(
         self,
         config: Namespace,
@@ -216,7 +222,12 @@ class PluginManager:
 
         # Configure enabled plugins now that we have runtime configs
         # Only do this if this is the first time we're receiving runtime configs
-        if not had_runtime_configs and self.global_config is not None and self.user_configs is not None and self.enabled:
+        if (
+            not had_runtime_configs
+            and self.global_config is not None
+            and self.user_configs is not None
+            and self.enabled
+        ):
             for plugin_name, plugin in self.enabled.items():
                 # Skip if already configured (this avoids double-configuration)
                 if plugin_name in self._configured_plugins:
@@ -231,7 +242,7 @@ class PluginManager:
                 except Exception as e:
                     logger.error(
                         f"Failed to configure plugin {plugin_name} with runtime configs: {e}",
-                        exc_info=True
+                        exc_info=True,
                     )
 
     def enable(self, name: str, config: Namespace | None = None) -> None:
@@ -250,7 +261,7 @@ class PluginManager:
             ValueError: If no configuration is available
         """
         if name not in self.available:
-            available = ', '.join(self.list_available())
+            available = ", ".join(self.list_available())
             raise KeyError(
                 f"Plugin '{name}' not found. "
                 f"Available plugins: {available if available else 'none'}"
@@ -277,7 +288,7 @@ class PluginManager:
         except Exception as e:
             logger.error(f"Failed to enable plugin {name}: {e}", exc_info=True)
             raise
-    
+
     def disable(self, name: str) -> None:
         """Disable a plugin and call its cleanup method.
 
@@ -294,28 +305,24 @@ class PluginManager:
             del self.enabled[name]
             self._configured_plugins.discard(name)
             logger.info(f"Disabled plugin: {name}")
-    
+
     def is_enabled(self, name: str) -> bool:
         """Check if a plugin is currently enabled.
-        
+
         Args:
             name: Plugin name
-            
+
         Returns:
             True if plugin is enabled
         """
         return name in self.enabled
-    
-    def add_plugin_arguments(
-        self,
-        parser: ArgumentParser,
-        plugin_names: List[str]
-    ) -> None:
+
+    def add_plugin_arguments(self, parser: ArgumentParser, plugin_names: List[str]) -> None:
         """Add CLI arguments for specified plugins.
-        
+
         Calls add_arguments() on each plugin to let them register
         their CLI options.
-        
+
         Args:
             parser: ArgumentParser to add arguments to
             plugin_names: List of plugin names to add arguments for
@@ -329,7 +336,7 @@ class PluginManager:
                     logger.debug(f"Added arguments for plugin: {name}")
                 except Exception as e:
                     logger.warning(f"Failed to add arguments for plugin {name}: {e}")
-    
+
     def call_hook(self, hook_name: str, **kwargs) -> None:
         """Call a hook on all enabled plugins.
 
@@ -342,12 +349,14 @@ class PluginManager:
             **kwargs: Arguments to pass to the hook
 
         Example:
-            >>> manager.call_hook('on_photo_downloaded',
-            ...                  photo_id='ABC123',
-            ...                  photo_filename='IMG_1234.jpg',
-            ...                  downloaded_files=[...],
-            ...                  is_favorite=True,
-            ...                  metadata={...})
+            >>> manager.call_hook(
+            ...     "on_photo_downloaded",
+            ...     photo_id="ABC123",
+            ...     photo_filename="IMG_1234.jpg",
+            ...     downloaded_files=[...],
+            ...     is_favorite=True,
+            ...     metadata={...},
+            ... )
         """
         for plugin_name, plugin in self.enabled.items():
             method = getattr(plugin, hook_name, None)
@@ -356,20 +365,19 @@ class PluginManager:
                     method(**kwargs)
                 except Exception as e:
                     logger.error(
-                        f"Plugin '{plugin_name}' hook '{hook_name}' failed: {e}",
-                        exc_info=True
+                        f"Plugin '{plugin_name}' hook '{hook_name}' failed: {e}", exc_info=True
                     )
-    
+
     def cleanup_all(self) -> None:
         """Cleanup all enabled plugins.
-        
+
         Calls cleanup() on all enabled plugins and disables them.
         Safe to call multiple times.
         """
         # Create a list to avoid modifying dict during iteration
         plugin_names = list(self.enabled.keys())
-        
+
         for name in plugin_names:
             self.disable(name)
-        
+
         logger.debug("All plugins cleaned up")

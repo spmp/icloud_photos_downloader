@@ -11,25 +11,24 @@ Key Components:
 Quick Start:
     To create a plugin, subclass IcloudpdPlugin and register it via
     entry points in your pyproject.toml:
-    
+
     [project.entry-points."icloudpd.plugins"]
     myplugin = "my_package.plugin:MyPlugin"
 
 Example Plugin:
     >>> from icloudpd.plugins.base import IcloudpdPlugin
-    >>> 
     >>> class MyPlugin(IcloudpdPlugin):
     ...     def __init__(self):
     ...         self.files = []  # Instance variable accumulator
-    ...     
+    ...
     ...     @property
     ...     def name(self) -> str:
     ...         return "myplugin"
-    ...     
+    ...
     ...     def on_download_complete(self, download_path, **kwargs):
     ...         # Accumulate files
     ...         self.files.append(download_path)
-    ...     
+    ...
     ...     def on_download_all_sizes_complete(self, photo, **kwargs):
     ...         # Process accumulated files
     ...         print(f"Photo {photo.filename}: {len(self.files)} files")
@@ -48,24 +47,23 @@ Available Hooks:
     - on_download_exists
     - on_download_downloaded
     - on_download_complete
-    
+
     Live photo hooks:
     - on_download_exists_live
     - on_download_downloaded_live
     - on_download_complete_live
-    
+
     Per-photo hook (KEY):
     - on_download_all_sizes_complete
-    
+
     Per-run hook:
     - on_run_completed
 
 Usage:
     >>> from icloudpd.plugins.manager import PluginManager
-    >>> 
     >>> manager = PluginManager()
     >>> manager.discover()
-    >>> manager.enable('demo', config)
+    >>> manager.enable("demo", config)
     >>> manager.call_hook('on_download_complete', download_path='/path/to/file', ...)
 """
 
@@ -73,8 +71,8 @@ from icloudpd.plugins.base import IcloudpdPlugin
 from icloudpd.plugins.manager import PluginManager
 
 __all__ = [
-    'IcloudpdPlugin',
-    'PluginManager',
+    "IcloudpdPlugin",
+    "PluginManager",
 ]
 
-__version__ = '1.0.0'
+__version__ = "1.0.0"

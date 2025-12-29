@@ -623,7 +623,10 @@ class DownloadPhotoNameIDTestCase(TestCase):
             base_dir,
             "listing_photos_fallback_to_original.yml",
             [],
-            [("2018/07/31", "IMG_7409_QVk2Yyt-adjusted.JPG"), ("2018/07/31", "IMG_7409_QVk2Yyt-alternative.JPG")],
+            [
+                ("2018/07/31", "IMG_7409_QVk2Yyt-adjusted.JPG"),
+                ("2018/07/31", "IMG_7409_QVk2Yyt-alternative.JPG"),
+            ],
             [
                 "--username",
                 "jdoe@gmail.com",
@@ -2192,13 +2195,13 @@ class DownloadPhotoNameIDTestCase(TestCase):
         self.assertIn(
             "IMG_7409_QVk2Yyt-adjusted.JPG already exists",
             result.output,
-            "icloudpd should recognize file with UUID already exists"
+            "icloudpd should recognize file with UUID already exists",
         )
 
         # Verify no wrong file was created
         self.assertFalse(
             os.path.exists(adjusted_wrong_path),
-            f"icloudpd should not create {adjusted_wrong_path} when {adjusted_correct_path} exists"
+            f"icloudpd should not create {adjusted_wrong_path} when {adjusted_correct_path} exists",
         )
 
     def test_no_redownload_with_uuid_filenames_name_id7(self) -> None:
@@ -2251,12 +2254,12 @@ class DownloadPhotoNameIDTestCase(TestCase):
         self.assertIn(
             "IMG_7409_QVk2Yyt-adjusted.JPG already exists",
             result.output,
-            "Adjusted file with UUID should be recognized as existing"
+            "Adjusted file with UUID should be recognized as existing",
         )
 
         # Verify no downloads happened
         self.assertNotIn(
             "Downloaded",
             result.output,
-            "No files should be downloaded when adjusted file with UUID already exists"
+            "No files should be downloaded when adjusted file with UUID already exists",
         )

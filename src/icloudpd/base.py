@@ -260,7 +260,11 @@ def create_logger(config: GlobalConfig) -> logging.Logger:
     return logger
 
 
-def run_with_configs(global_config: GlobalConfig, user_configs: Sequence[UserConfig], plugin_manager: PluginManager | None) -> int:
+def run_with_configs(
+    global_config: GlobalConfig,
+    user_configs: Sequence[UserConfig],
+    plugin_manager: PluginManager | None,
+) -> int:
     """Run the application with the new configuration system"""
 
     # Create shared logger
@@ -271,7 +275,7 @@ def run_with_configs(global_config: GlobalConfig, user_configs: Sequence[UserCon
         plugin_manager.set_plugin_config(
             plugin_manager.plugin_config,  # Keep existing namespace
             global_config,
-            user_configs
+            user_configs,
         )
 
     # Create shared status exchange for web server and progress tracking
@@ -293,7 +297,9 @@ def run_with_configs(global_config: GlobalConfig, user_configs: Sequence[UserCon
 
     if not watch_interval:
         # No watch mode - process each user once and exit
-        return _process_all_users_once(global_config, user_configs, logger, shared_status_exchange, plugin_manager)
+        return _process_all_users_once(
+            global_config, user_configs, logger, shared_status_exchange, plugin_manager
+        )
     else:
         # Watch mode - infinite loop processing all users, then wait
         skip_bar = not os.environ.get("FORCE_TQDM") and (
@@ -758,7 +764,7 @@ def download_builder(
                 if plugin_manager:
                     try:
                         plugin_manager.call_hook(
-                            'on_download_exists',
+                            "on_download_exists",
                             download_path=download_path,
                             photo_filename=photo_filename,
                             download_size=requested_size,  # Use requested size, not fallback
@@ -767,7 +773,7 @@ def download_builder(
                         )
                     except Exception as e:
                         logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-                #logger.debug(f"HOOK: File already exists. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
+                # logger.debug(f"HOOK: File already exists. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
 
         if not file_exists:
             counter.reset()
@@ -796,20 +802,34 @@ def download_builder(
 
                         is_jpeg = compose(endswith((".jpg", ".jpeg")), lower)
 
-                        is_favorite = photo._asset_record["fields"].get("isFavorite", {}).get("value") == 1
-                        needs_datetime = not dry_run and set_exif_datetime and not exif_datetime.get_photo_exif(logger, download_path)
+                        is_favorite = (
+                            photo._asset_record["fields"].get("isFavorite", {}).get("value") == 1
+                        )
+                        needs_datetime = (
+                            not dry_run
+                            and set_exif_datetime
+                            and not exif_datetime.get_photo_exif(logger, download_path)
+                        )
                         # Write favorite status to rating EXIF field only if favorite. Consider changing this to always give a rating.
                         needs_rating = not dry_run and favorite_to_rating and is_favorite
 
                         if not dry_run and is_jpeg(filename) and (needs_datetime or needs_rating):
-                            datetime_str = created_date.strftime("%Y:%m:%d %H:%M:%S") if needs_datetime else None
+                            datetime_str = (
+                                created_date.strftime("%Y:%m:%d %H:%M:%S")
+                                if needs_datetime
+                                else None
+                            )
                             rating_value = favorite_to_rating if needs_rating else None
-                            
+
                             logger.debug(
                                 "Setting EXIF for %s: datetime=%s, rating=%s",
-                                download_path, datetime_str, rating_value
+                                download_path,
+                                datetime_str,
+                                rating_value,
                             )
-                            exif_datetime.set_photo_exif(logger, download_path, datetime_str, rating_value)
+                            exif_datetime.set_photo_exif(
+                                logger, download_path, datetime_str, rating_value
+                            )
 
                         if not dry_run:
                             download.set_utime(download_path, created_date)
@@ -826,7 +846,7 @@ def download_builder(
                 if plugin_manager:
                     try:
                         plugin_manager.call_hook(
-                            'on_download_downloaded',
+                            "on_download_downloaded",
                             download_path=download_path,
                             photo_filename=photo_filename,
                             download_size=requested_size,  # Use requested size, not fallback
@@ -835,16 +855,18 @@ def download_builder(
                         )
                     except Exception as e:
                         logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-                #logger.debug(f"HOOK: File downloaded. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
+                # logger.debug(f"HOOK: File downloaded. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
 
         if xmp_sidecar:
-            generate_xmp_file(logger, download_path, photo._asset_record, favorite_to_rating, dry_run)
-        
+            generate_xmp_file(
+                logger, download_path, photo._asset_record, favorite_to_rating, dry_run
+            )
+
         # HOOK: Download complete or existing (always happens)
         if plugin_manager:
             try:
                 plugin_manager.call_hook(
-                    'on_download_complete',
+                    "on_download_complete",
                     download_path=download_path,
                     photo_filename=photo_filename,
                     download_size=requested_size,  # Use requested size, not fallback
@@ -853,8 +875,7 @@ def download_builder(
                 )
             except Exception as e:
                 logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-        #logger.debug(f"HOOK: File operations complete. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
-
+        # logger.debug(f"HOOK: File operations complete. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
 
     # Also download the live photo if present
     if not skip_live_photos:
@@ -917,7 +938,7 @@ def download_builder(
                         if plugin_manager:
                             try:
                                 plugin_manager.call_hook(
-                                    'on_download_exists_live',
+                                    "on_download_exists_live",
                                     download_path=lp_download_path,
                                     photo_filename=lp_photo_filename,
                                     download_size=lp_size,
@@ -926,7 +947,7 @@ def download_builder(
                                 )
                             except Exception as e:
                                 logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-                        #logger.debug(f"HOOK: photo_filenameFile exists, live photo. Contexts: download_path: {lp_download_path}, photo_filename: {lp_photo_filename}, filename: {filename}, version: {version}, download_size: {lp_size}, photo: {photo}")
+                        # logger.debug(f"HOOK: photo_filenameFile exists, live photo. Contexts: download_path: {lp_download_path}, photo_filename: {lp_photo_filename}, filename: {filename}, version: {version}, download_size: {lp_size}, photo: {photo}")
 
                 if not lp_file_exists:
                     truncated_path = truncate_middle(lp_download_path, 96)
@@ -949,7 +970,7 @@ def download_builder(
                             if plugin_manager:
                                 try:
                                     plugin_manager.call_hook(
-                                        'on_download_downloaded_live',
+                                        "on_download_downloaded_live",
                                         download_path=lp_download_path,
                                         photo_filename=lp_photo_filename,
                                         download_size=lp_size,
@@ -958,7 +979,7 @@ def download_builder(
                                     )
                                 except Exception as e:
                                     logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-                            #logger.debug(f"HOOK: File downloaded, live photo. Contexts: download_path: {lp_download_path}, photo_filename: {lp_photo_filename}, filename: {filename}, version: {version}, download_size: {lp_size}, photo: {photo}")
+                            # logger.debug(f"HOOK: File downloaded, live photo. Contexts: download_path: {lp_download_path}, photo_filename: {lp_photo_filename}, filename: {filename}, version: {version}, download_size: {lp_size}, photo: {photo}")
 
                             # Update last_result to success if it was skipped
                             match last_result:
@@ -982,7 +1003,7 @@ def download_builder(
             if plugin_manager:
                 try:
                     plugin_manager.call_hook(
-                        'on_download_complete_live',
+                        "on_download_complete_live",
                         download_path=download_path,
                         photo_filename=photo_filename,
                         download_size=download_size,
@@ -991,19 +1012,19 @@ def download_builder(
                     )
                 except Exception as e:
                     logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-            #logger.debug(f"HOOK: File operations complete, live photo. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
+            # logger.debug(f"HOOK: File operations complete, live photo. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
 
     # HOOK: All file operations for image size sets complete
     if plugin_manager:
         try:
             plugin_manager.call_hook(
-                'on_download_all_sizes_complete',
+                "on_download_all_sizes_complete",
                 photo=photo,
                 dry_run=dry_run,
             )
         except Exception as e:
             logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-    #logger.debug(f"HOOK: All file operations complete for image sizes. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
+    # logger.debug(f"HOOK: All file operations complete for image sizes. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
 
     return last_result
 
@@ -1718,12 +1739,11 @@ def core_single_run(
     if plugin_manager:
         try:
             plugin_manager.call_hook(
-                'on_run_completed',
+                "on_run_completed",
                 dry_run=user_config.dry_run,
             )
             plugin_manager.cleanup_all()
         except Exception as e:
             logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-
 
     return 0

@@ -97,7 +97,7 @@ class CliTestCase(TestCase):
                     mfa_provider=MFAProvider.CONSOLE,
                     plugins=None,
                 ),
-                []
+                [],
             ),
             "--help",
         )
@@ -583,7 +583,8 @@ class CliTestCase(TestCase):
             for text in not_expected:
                 # Filter out plugin discovery messages which always run at startup
                 log_text = "\n".join(
-                    line for line in self._caplog.text.split("\n")
+                    line
+                    for line in self._caplog.text.split("\n")
                     if "Discovered plugin:" not in line
                 )
                 self.assertNotIn(text, log_text)
@@ -804,9 +805,7 @@ class PluginCliTestCase(TestCase):
 
     def test_plugin_parser_multiple_plugins(self) -> None:
         self.assertEqual.__self__.maxDiff = None  # type: ignore[attr-defined]
-        global_config, user_configs, _ = parse(
-            ["--plugin", "demo", "--plugin", "immich"]
-        )
+        global_config, user_configs, _ = parse(["--plugin", "demo", "--plugin", "immich"])
         self.assertEqual(
             (global_config, user_configs),
             (
@@ -976,4 +975,3 @@ class PluginCliTestCase(TestCase):
         self.assertEqual(result.exit_code, 0, "exit code")
         self.assertIn("Plugin 'nonexistent' not found", result.output)
         self.assertIn("Available:", result.output)
-

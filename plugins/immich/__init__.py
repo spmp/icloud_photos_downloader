@@ -20,5 +20,5 @@ Example:
 
 from plugins.immich.immich import ImmichPlugin
 
-__all__ = ['ImmichPlugin']
-__version__ = '1.0.0'
+__all__ = ["ImmichPlugin"]
+__version__ = "1.0.0"

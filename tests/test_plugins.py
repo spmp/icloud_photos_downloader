@@ -272,9 +272,7 @@ class TestPluginManager(unittest.TestCase):
         mock_photo = MagicMock(spec=PhotoAsset)
         mock_photo.filename = "test.jpg"
 
-        manager.call_hook(
-            "on_download_all_sizes_complete", photo=mock_photo, dry_run=False
-        )
+        manager.call_hook("on_download_all_sizes_complete", photo=mock_photo, dry_run=False)
 
         self.assertEqual(len(manager.enabled["mock1"].calls), 1)
         self.assertEqual(len(manager.enabled["mock2"].calls), 1)
@@ -442,9 +440,9 @@ class TestImmichPluginIntegration(unittest.TestCase):
 
         # Configure with minimal required settings
         config = Namespace(
-            immich_server_url='http://localhost:2283',
-            immich_api_key='test-key',
-            immich_library_id='lib-123',
+            immich_server_url="http://localhost:2283",
+            immich_api_key="test-key",
+            immich_library_id="lib-123",
             immich_process_existing=False,
             immich_scan_timeout=5.0,
             immich_poll_interval=1.0,
@@ -455,12 +453,12 @@ class TestImmichPluginIntegration(unittest.TestCase):
         )
 
         # Enable the plugin (with mocked connection test)
-        with unittest.mock.patch.object(ImmichPlugin, '_test_immich_connection'):
-            manager.enable('immich', config)
+        with unittest.mock.patch.object(ImmichPlugin, "_test_immich_connection"):
+            manager.enable("immich", config)
 
         # Verify plugin was enabled
-        self.assertTrue(manager.is_enabled('immich'))
-        plugin = manager.enabled['immich']
+        self.assertTrue(manager.is_enabled("immich"))
+        plugin = manager.enabled["immich"]
 
         # Test that hooks are called via manager.call_hook()
         mock_photo = MagicMock(spec=PhotoAsset)
@@ -471,18 +469,18 @@ class TestImmichPluginIntegration(unittest.TestCase):
 
         # Call on_download_downloaded hook via manager
         manager.call_hook(
-            'on_download_downloaded',
-            download_path='/photos/IMG_001.jpg',
-            photo_filename='IMG_001.jpg',
+            "on_download_downloaded",
+            download_path="/photos/IMG_001.jpg",
+            photo_filename="IMG_001.jpg",
             download_size=AssetVersionSize.ADJUSTED,
             photo=mock_photo,
-            dry_run=False
+            dry_run=False,
         )
 
         # Verify the plugin accumulated the file
         self.assertEqual(len(plugin.current_photo_files), 1)
-        self.assertEqual(plugin.current_photo_files[0]['status'], 'downloaded')
-        self.assertEqual(plugin.current_photo_files[0]['size'], 'adjusted')
+        self.assertEqual(plugin.current_photo_files[0]["status"], "downloaded")
+        self.assertEqual(plugin.current_photo_files[0]["size"], "adjusted")
 
     def test_immich_plugin_hook_not_called_with_wrong_signature(self):
         """Test that hooks with mismatched signatures are not called
@@ -496,9 +494,9 @@ class TestImmichPluginIntegration(unittest.TestCase):
         manager.available["immich"] = ImmichPlugin
 
         config = Namespace(
-            immich_server_url='http://localhost:2283',
-            immich_api_key='test-key',
-            immich_library_id='lib-123',
+            immich_server_url="http://localhost:2283",
+            immich_api_key="test-key",
+            immich_library_id="lib-123",
             immich_process_existing=False,
             immich_scan_timeout=5.0,
             immich_poll_interval=1.0,
@@ -508,20 +506,18 @@ class TestImmichPluginIntegration(unittest.TestCase):
             immich_albums=None,
         )
 
-        with unittest.mock.patch.object(ImmichPlugin, '_test_immich_connection'):
-            manager.enable('immich', config)
+        with unittest.mock.patch.object(ImmichPlugin, "_test_immich_connection"):
+            manager.enable("immich", config)
 
-        plugin = manager.enabled['immich']
+        plugin = manager.enabled["immich"]
 
         # Try calling hook with wrong parameter names (should fail silently in call_hook)
-        mock_photo = MagicMock(spec=PhotoAsset)
-
         # This should not raise but also should not accumulate anything
         # because the parameters don't match what the method expects
         manager.call_hook(
-            'on_download_downloaded',
-            wrong_param='/photos/IMG_001.jpg',
-            another_wrong='IMG_001.jpg',
+            "on_download_downloaded",
+            wrong_param="/photos/IMG_001.jpg",
+            another_wrong="IMG_001.jpg",
         )
 
         # Plugin should NOT have accumulated anything
@@ -535,9 +531,9 @@ class TestImmichPluginIntegration(unittest.TestCase):
         manager.available["immich"] = ImmichPlugin
 
         config = Namespace(
-            immich_server_url='http://localhost:2283',
-            immich_api_key='test-key',
-            immich_library_id='lib-123',
+            immich_server_url="http://localhost:2283",
+            immich_api_key="test-key",
+            immich_library_id="lib-123",
             immich_process_existing=True,  # Enable processing existing files
             immich_scan_timeout=5.0,
             immich_poll_interval=1.0,
@@ -547,10 +543,10 @@ class TestImmichPluginIntegration(unittest.TestCase):
             immich_albums=None,
         )
 
-        with unittest.mock.patch.object(ImmichPlugin, '_test_immich_connection'):
-            manager.enable('immich', config)
+        with unittest.mock.patch.object(ImmichPlugin, "_test_immich_connection"):
+            manager.enable("immich", config)
 
-        plugin = manager.enabled['immich']
+        plugin = manager.enabled["immich"]
 
         mock_photo = MagicMock(spec=PhotoAsset)
         mock_photo.filename = "test.jpg"
@@ -559,27 +555,27 @@ class TestImmichPluginIntegration(unittest.TestCase):
 
         # Simulate download workflow: one exists, one downloaded
         manager.call_hook(
-            'on_download_exists',
-            download_path='/photos/original.jpg',
-            photo_filename='test.jpg',
+            "on_download_exists",
+            download_path="/photos/original.jpg",
+            photo_filename="test.jpg",
             download_size=AssetVersionSize.ORIGINAL,
             photo=mock_photo,
-            dry_run=False
+            dry_run=False,
         )
 
         manager.call_hook(
-            'on_download_downloaded',
-            download_path='/photos/medium.jpg',
-            photo_filename='test.jpg',
+            "on_download_downloaded",
+            download_path="/photos/medium.jpg",
+            photo_filename="test.jpg",
             download_size=AssetVersionSize.MEDIUM,
             photo=mock_photo,
-            dry_run=False
+            dry_run=False,
         )
 
         # Should have accumulated 2 files
         self.assertEqual(len(plugin.current_photo_files), 2)
-        self.assertEqual(plugin.current_photo_files[0]['status'], 'existed')
-        self.assertEqual(plugin.current_photo_files[1]['status'], 'downloaded')
+        self.assertEqual(plugin.current_photo_files[0]["status"], "existed")
+        self.assertEqual(plugin.current_photo_files[1]["status"], "downloaded")
 
     def test_immich_plugin_discovered_and_callable(self):
         """Test that Immich plugin is discovered and hooks are callable
@@ -591,13 +587,13 @@ class TestImmichPluginIntegration(unittest.TestCase):
         manager.discover()
 
         # Verify immich was discovered
-        self.assertIn('immich', manager.list_available())
+        self.assertIn("immich", manager.list_available())
 
         # Configure plugin
         config = Namespace(
-            immich_server_url='http://localhost:2283',
-            immich_api_key='test-key',
-            immich_library_id='lib-123',
+            immich_server_url="http://localhost:2283",
+            immich_api_key="test-key",
+            immich_library_id="lib-123",
             immich_process_existing=True,
             immich_scan_timeout=5.0,
             immich_poll_interval=1.0,
@@ -612,11 +608,12 @@ class TestImmichPluginIntegration(unittest.TestCase):
 
         # Mock the connection test
         from plugins.immich.immich import ImmichPlugin
-        with unittest.mock.patch.object(ImmichPlugin, '_test_immich_connection'):
-            manager.enable('immich')
+
+        with unittest.mock.patch.object(ImmichPlugin, "_test_immich_connection"):
+            manager.enable("immich")
 
         # Verify plugin is enabled
-        self.assertTrue(manager.is_enabled('immich'))
+        self.assertTrue(manager.is_enabled("immich"))
 
         # Call hooks as icloudpd would
         mock_photo = MagicMock(spec=PhotoAsset)
@@ -626,19 +623,22 @@ class TestImmichPluginIntegration(unittest.TestCase):
 
         # Simulate the exact call pattern icloudpd uses
         manager.call_hook(
-            'on_download_downloaded',
-            download_path='/photos/IMG_001.jpg',
-            photo_filename='IMG_001.jpg',
+            "on_download_downloaded",
+            download_path="/photos/IMG_001.jpg",
+            photo_filename="IMG_001.jpg",
             download_size=AssetVersionSize.ADJUSTED,
             photo=mock_photo,
-            dry_run=False
+            dry_run=False,
         )
 
         # Verify hook was called and plugin accumulated the file
-        plugin = manager.enabled['immich']
-        self.assertEqual(len(plugin.current_photo_files), 1,
-                        "Plugin should have accumulated 1 file via hook call")
-        self.assertEqual(plugin.current_photo_files[0]['size'], 'adjusted')
+        plugin = manager.enabled["immich"]
+        self.assertEqual(
+            len(plugin.current_photo_files),
+            1,
+            "Plugin should have accumulated 1 file via hook call",
+        )
+        self.assertEqual(plugin.current_photo_files[0]["size"], "adjusted")
 
 
 if __name__ == "__main__":

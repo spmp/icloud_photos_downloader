@@ -60,6 +60,7 @@ logger = logging.getLogger("icloudpd.plugins.immich")
 # Helper Functions
 # ============================================================================
 
+
 def _parse_sizes(value: str | None) -> List[str]:
     """Parse comma-separated size list and validate against available sizes.
 
@@ -72,21 +73,19 @@ def _parse_sizes(value: str | None) -> List[str]:
     Raises:
         argparse.ArgumentTypeError: If invalid sizes specified
     """
-    available = ['original', 'adjusted', 'alternative', 'medium', 'thumb']
+    available = ["original", "adjusted", "alternative", "medium", "thumb"]
 
     # No value given (--flag with no argument) → return all
     if value is None:
         return available
 
     # Parse comma-separated values
-    items = [s.strip() for s in value.split(',')]
+    items = [s.strip() for s in value.split(",")]
 
     # Validate against available
     invalid = [s for s in items if s not in available]
     if invalid:
-        raise argparse.ArgumentTypeError(
-            f"Invalid sizes: {invalid}. Available: {available}"
-        )
+        raise argparse.ArgumentTypeError(f"Invalid sizes: {invalid}. Available: {available}")
 
     return items
 
@@ -108,16 +107,14 @@ def _parse_batch_size(value: str | None) -> int:
         return 0
 
     # Explicit 'all' → 0
-    if value.lower() == 'all':
+    if value.lower() == "all":
         return 0
 
     # Try to parse as integer
     try:
         batch_size = int(value)
         if batch_size < 1:
-            raise argparse.ArgumentTypeError(
-                f"Batch size must be >= 1, got {batch_size}"
-            )
+            raise argparse.ArgumentTypeError(f"Batch size must be >= 1, got {batch_size}")
         return batch_size
     except ValueError as e:
         raise argparse.ArgumentTypeError(
@@ -129,6 +126,7 @@ def _parse_batch_size(value: str | None) -> int:
 # Pure Helper Functions
 # ============================================================================
 
+
 def _has_new_files(files: List[Dict]) -> bool:
     """Check if any files were newly downloaded (vs existed).
 
@@ -138,7 +136,7 @@ def _has_new_files(files: List[Dict]) -> bool:
     Returns:
         True if any file has status 'downloaded'
     """
-    return any(f['status'] == 'downloaded' for f in files)
+    return any(f["status"] == "downloaded" for f in files)
 
 
 def _get_asset_ids_for_sizes(assets: List[Dict[str, Any]], target_sizes: List[str]) -> List[str]:
@@ -151,12 +149,13 @@ def _get_asset_ids_for_sizes(assets: List[Dict[str, Any]], target_sizes: List[st
     Returns:
         List of asset IDs matching target sizes
     """
-    return [a['asset_id'] for a in assets if a['size'] in target_sizes]
+    return [a["asset_id"] for a in assets if a["size"] in target_sizes]
 
 
 # ============================================================================
 # Album Rule Class
 # ============================================================================
+
 
 class AlbumRule:
     """Represents a single album assignment rule.
@@ -182,17 +181,17 @@ class AlbumRule:
             ValueError: If rule format is invalid or contains [stacked]
         """
         # Try to match [sizes]:template format
-        match = re.match(r'^\[([^\]]+)\]:(.+)$', rule_string.strip())
+        match = re.match(r"^\[([^\]]+)\]:(.+)$", rule_string.strip())
 
         if match:
             # Has size filter
             sizes_str, self.template = match.groups()
 
             # Parse size targets
-            self.size_targets = [s.strip() for s in sizes_str.split(',')]
+            self.size_targets = [s.strip() for s in sizes_str.split(",")]
 
             # Validate: [stacked] is no longer allowed
-            if 'stacked' in self.size_targets:
+            if "stacked" in self.size_targets:
                 raise ValueError(
                     "Album rule '[stacked]:...' is not supported. "
                     "Stacks cannot be added to albums in Immich. "
@@ -200,12 +199,11 @@ class AlbumRule:
                 )
 
             # Validate all sizes are known
-            valid_sizes = ['original', 'adjusted', 'alternative', 'medium', 'thumb']
+            valid_sizes = ["original", "adjusted", "alternative", "medium", "thumb"]
             invalid = [s for s in self.size_targets if s not in valid_sizes]
             if invalid:
                 raise ValueError(
-                    f"Invalid sizes in album rule: {invalid}. "
-                    f"Valid sizes: {valid_sizes}"
+                    f"Invalid sizes in album rule: {invalid}. Valid sizes: {valid_sizes}"
                 )
 
             self.match_all = False
@@ -244,6 +242,7 @@ class AlbumRule:
 # Immich Plugin
 # ============================================================================
 
+
 class ImmichPlugin(IcloudpdPlugin):
     """Immich integration plugin for photo management.
 
@@ -277,11 +276,11 @@ class ImmichPlugin(IcloudpdPlugin):
         # Batch processing configuration
         # batch_size: 0='all' (process at end), 1=immediate (default), N=batch every N photos
         self.batch_size: int = 1
-        self.batch_log_file: str = os.path.expanduser('~/.pyicloud/immich_pending_files.json')
+        self.batch_log_file: str = os.path.expanduser("~/.pyicloud/immich_pending_files.json")
 
         # Stacking configuration
         self.stack_media: bool = False
-        self.stack_priority: List[str] = ['adjusted', 'medium', 'original']
+        self.stack_priority: List[str] = ["adjusted", "medium", "original"]
 
         # Favoriting configuration - now a list of sizes to favorite
         self.favorite_sizes: List[str] = []
@@ -329,119 +328,117 @@ class ImmichPlugin(IcloudpdPlugin):
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         """Add Immich plugin CLI arguments"""
-        group = parser.add_argument_group('Immich Plugin Options')
+        group = parser.add_argument_group("Immich Plugin Options")
 
         group.add_argument(
-            '--immich-server-url',
-            metavar='URL',
-            help='Immich server URL (e.g., https://immich.example.com)'
+            "--immich-server-url",
+            metavar="URL",
+            help="Immich server URL (e.g., https://immich.example.com)",
         )
 
         group.add_argument(
-            '--immich-api-key',
-            metavar='KEY',
-            help='Immich API key for authentication'
+            "--immich-api-key", metavar="KEY", help="Immich API key for authentication"
         )
 
         group.add_argument(
-            '--immich-library-id',
-            metavar='ID',
-            help='Immich external library ID (required for scanning)'
+            "--immich-library-id",
+            metavar="ID",
+            help="Immich external library ID (required for scanning)",
         )
 
         group.add_argument(
-            '--immich-process-existing',
-            action='store_true',
-            help='Process files that already existed (in addition to newly downloaded files)'
+            "--immich-process-existing",
+            action="store_true",
+            help="Process files that already existed (in addition to newly downloaded files)",
         )
 
         group.add_argument(
-            '--immich-process-existing-favorites',
-            action='store_true',
-            help='Process only existing files that are marked as favorites in iCloud '
-                 '(useful for updating favorite status after initial download)'
+            "--immich-process-existing-favorites",
+            action="store_true",
+            help="Process only existing files that are marked as favorites in iCloud "
+            "(useful for updating favorite status after initial download)",
         )
 
         group.add_argument(
-            '--immich-stack-media',
-            nargs='?',
+            "--immich-stack-media",
+            nargs="?",
             const=None,
             default=False,
             type=_parse_sizes,
-            metavar='SIZE(Primary),SIZE,...',
-            help='Stack size variants. No argument stacks all sizes. '
-                 'With argument: comma-separated priority list (first=primary)'
+            metavar="SIZE(Primary),SIZE,...",
+            help="Stack size variants. No argument stacks all sizes. "
+            "With argument: comma-separated priority list (first=primary)",
         )
 
         group.add_argument(
-            '--immich-favorite',
-            nargs='?',
+            "--immich-favorite",
+            nargs="?",
             const=None,
             default=False,
             type=_parse_sizes,
-            metavar='SIZE,SIZE,...',
-            help='Mark sizes as favorite in Immich based on iCloud favorite status. '
-                 'No argument favorites all sizes. With argument: comma-separated list of sizes'
+            metavar="SIZE,SIZE,...",
+            help="Mark sizes as favorite in Immich based on iCloud favorite status. "
+            "No argument favorites all sizes. With argument: comma-separated list of sizes",
         )
 
         group.add_argument(
-            '--associate-live-with-extra-sizes',
-            nargs='?',
+            "--associate-live-with-extra-sizes",
+            nargs="?",
             const=None,
             default=False,
             type=_parse_sizes,
-            metavar='SIZE,SIZE,...',
-            help='Associate live photo MOV with other sizes. '
-                 'No argument associates with all sizes. With argument: comma-separated list of sizes'
+            metavar="SIZE,SIZE,...",
+            help="Associate live photo MOV with other sizes. "
+            "No argument associates with all sizes. With argument: comma-separated list of sizes",
         )
 
         group.add_argument(
-            '--immich-album',
-            action='append',
-            dest='immich_albums',
-            metavar='RULE',
-            help='Album rule in format [sizes]:template or just template (all sizes). '
-                 'Can be used multiple times. '
-                 'Examples: --immich-album "[adjusted]:iCloud/{:%%Y/%%m}" '
-                 '--immich-album "[original]:Raw" --immich-album "All Photos"'
+            "--immich-album",
+            action="append",
+            dest="immich_albums",
+            metavar="RULE",
+            help="Album rule in format [sizes]:template or just template (all sizes). "
+            "Can be used multiple times. "
+            'Examples: --immich-album "[adjusted]:iCloud/{:%%Y/%%m}" '
+            '--immich-album "[original]:Raw" --immich-album "All Photos"',
         )
 
         group.add_argument(
-            '--immich-scan-timeout',
+            "--immich-scan-timeout",
             type=float,
             default=5.0,
-            metavar='SECONDS',
-            help='Time to wait for Immich library scan to complete after adding photos '
-                 '(default: %(default)s, 0 for infinite)'
+            metavar="SECONDS",
+            help="Time to wait for Immich library scan to complete after adding photos "
+            "(default: %(default)s, 0 for infinite)",
         )
 
         group.add_argument(
-            '--immich-poll-interval',
+            "--immich-poll-interval",
             type=float,
             default=1.0,
-            metavar='SECONDS',
-            help='Time to wait for between polls post scan. (default: %(default)s)'
+            metavar="SECONDS",
+            help="Time to wait for between polls post scan. (default: %(default)s)",
         )
 
         group.add_argument(
-            '--immich-batch-process',
-            nargs='?',
+            "--immich-batch-process",
+            nargs="?",
             const=None,
             default=False,
             type=_parse_batch_size,
-            metavar='N|all',
-            help='Batch process photos to reduce Immich server load. '
-                 'No argument or "all": process all at end. '
-                 'Integer N: process every N photos. '
-                 'Reduces library scan frequency by accumulating photos before processing. '
-                 'Default: disabled (process each photo immediately)'
+            metavar="N|all",
+            help="Batch process photos to reduce Immich server load. "
+            'No argument or "all": process all at end. '
+            "Integer N: process every N photos. "
+            "Reduces library scan frequency by accumulating photos before processing. "
+            "Default: disabled (process each photo immediately)",
         )
 
         group.add_argument(
-            '--immich-batch-log-file',
-            metavar='PATH',
-            help='Path to batch processing log file for crash recovery '
-                 '(default: ~/.pyicloud/immich_pending_files.json)'
+            "--immich-batch-log-file",
+            metavar="PATH",
+            help="Path to batch processing log file for crash recovery "
+            "(default: ~/.pyicloud/immich_pending_files.json)",
         )
 
     # ========================================================================
@@ -466,26 +463,28 @@ class ImmichPlugin(IcloudpdPlugin):
             user_configs: List of user configurations (None on first call)
         """
         # Basic configuration
-        self.server_url = getattr(config, 'immich_server_url', None)
-        self.api_key = getattr(config, 'immich_api_key', None)
-        self.library_id = getattr(config, 'immich_library_id', None)
-        self.process_existing = getattr(config, 'immich_process_existing', False)
-        self.process_existing_favorites = getattr(config, 'immich_process_existing_favorites', False)
-        self.scan_timeout = getattr(config, 'immich_scan_timeout', 5.0)
-        self.poll_interval = getattr(config, 'immich_poll_interval', 1.0)
+        self.server_url = getattr(config, "immich_server_url", None)
+        self.api_key = getattr(config, "immich_api_key", None)
+        self.library_id = getattr(config, "immich_library_id", None)
+        self.process_existing = getattr(config, "immich_process_existing", False)
+        self.process_existing_favorites = getattr(
+            config, "immich_process_existing_favorites", False
+        )
+        self.scan_timeout = getattr(config, "immich_scan_timeout", 5.0)
+        self.poll_interval = getattr(config, "immich_poll_interval", 1.0)
 
         # Batch processing configuration
-        batch_arg = getattr(config, 'immich_batch_process', False)
+        batch_arg = getattr(config, "immich_batch_process", False)
         if batch_arg is not False:
             self.batch_size = batch_arg  # Will be int: 0='all', 1=immediate, N=batch every N
 
         # Batch log file
-        batch_log_file_arg = getattr(config, 'immich_batch_log_file', None)
+        batch_log_file_arg = getattr(config, "immich_batch_log_file", None)
         if batch_log_file_arg:
             self.batch_log_file = batch_log_file_arg
 
         # Parse stack_media argument (False, None=all, or list of sizes)
-        stack_arg = getattr(config, 'immich_stack_media', False)
+        stack_arg = getattr(config, "immich_stack_media", False)
         if stack_arg is not False:
             self.stack_media = True
             if stack_arg is not None and isinstance(stack_arg, list):
@@ -493,27 +492,33 @@ class ImmichPlugin(IcloudpdPlugin):
                 self.stack_priority = stack_arg
 
         # Parse favorite argument (False, None=all, or list of sizes)
-        favorite_arg = getattr(config, 'immich_favorite', False)
+        favorite_arg = getattr(config, "immich_favorite", False)
         if favorite_arg is not False:
             if favorite_arg is None:
                 # Favorite all sizes
-                self.favorite_sizes = ['original', 'adjusted', 'alternative', 'medium', 'thumb']
+                self.favorite_sizes = ["original", "adjusted", "alternative", "medium", "thumb"]
             elif isinstance(favorite_arg, list):
                 # Favorite specific sizes
                 self.favorite_sizes = favorite_arg
 
         # Parse associate-live argument (False, None=all, or list of sizes)
-        associate_arg = getattr(config, 'associate_live_with_extra_sizes', False)
+        associate_arg = getattr(config, "associate_live_with_extra_sizes", False)
         if associate_arg is not False:
             if associate_arg is None:
                 # Associate with all sizes
-                self.associate_live_sizes = ['original', 'adjusted', 'alternative', 'medium', 'thumb']
+                self.associate_live_sizes = [
+                    "original",
+                    "adjusted",
+                    "alternative",
+                    "medium",
+                    "thumb",
+                ]
             elif isinstance(associate_arg, list):
                 # Associate with specific sizes
                 self.associate_live_sizes = associate_arg
 
         # Parse album rules
-        album_rules_raw = getattr(config, 'immich_albums', None) or []
+        album_rules_raw = getattr(config, "immich_albums", None) or []
         for rule_str in album_rules_raw:
             try:
                 rule = AlbumRule(rule_str)
@@ -533,12 +538,23 @@ class ImmichPlugin(IcloudpdPlugin):
             print("Error: Immich library ID is required (--immich-library-id)", file=sys.stderr)
             sys.exit(1)
         if self.process_existing and self.process_existing_favorites:
-            print("Error: Cannot use both --immich-process-existing and --immich-process-existing-favorites", file=sys.stderr)
-            print("Choose one: process all existing files OR only existing favorites", file=sys.stderr)
+            print(
+                "Error: Cannot use both --immich-process-existing and --immich-process-existing-favorites",
+                file=sys.stderr,
+            )
+            print(
+                "Choose one: process all existing files OR only existing favorites", file=sys.stderr
+            )
             sys.exit(1)
         if self.process_existing_favorites and not self.favorite_sizes:
-            print("Warning: --immich-process-existing-favorites is enabled but no favorite sizes configured", file=sys.stderr)
-            print("Add --immich-favorite to specify which sizes to mark as favorites in Immich", file=sys.stderr)
+            print(
+                "Warning: --immich-process-existing-favorites is enabled but no favorite sizes configured",
+                file=sys.stderr,
+            )
+            print(
+                "Add --immich-favorite to specify which sizes to mark as favorites in Immich",
+                file=sys.stderr,
+            )
 
         # Print configuration (using print since logger isn't configured yet)
         print("\n" + "=" * 70)
@@ -549,7 +565,11 @@ class ImmichPlugin(IcloudpdPlugin):
         print(f"  Library ID:               {self.library_id}")
         print(f"  Process Existing:         {self.process_existing}")
         print(f"  Process Existing Favs:    {self.process_existing_favorites}")
-        batch_desc = "all (at end)" if self.batch_size == 0 else ("immediate" if self.batch_size == 1 else f"every {self.batch_size} photos")
+        batch_desc = (
+            "all (at end)"
+            if self.batch_size == 0
+            else ("immediate" if self.batch_size == 1 else f"every {self.batch_size} photos")
+        )
         print(f"  Batch Processing:         {batch_desc}")
         if self.batch_size != 1:
             print(f"  Batch Log File:           {self.batch_log_file}")
@@ -558,8 +578,12 @@ class ImmichPlugin(IcloudpdPlugin):
         print(f"  Stack Media:              {self.stack_media}")
         if self.stack_media:
             print(f"  Stack Priority:           {', '.join(self.stack_priority)}")
-        print(f"  Favorite Sizes:           {', '.join(self.favorite_sizes) if self.favorite_sizes else 'None'}")
-        print(f"  Live Association:         {', '.join(self.associate_live_sizes) if self.associate_live_sizes else 'None'}")
+        print(
+            f"  Favorite Sizes:           {', '.join(self.favorite_sizes) if self.favorite_sizes else 'None'}"
+        )
+        print(
+            f"  Live Association:         {', '.join(self.associate_live_sizes) if self.associate_live_sizes else 'None'}"
+        )
         print(f"  Album Rules:              {len(self.album_rules)}")
         for rule in self.album_rules:
             print(f"    - {rule}")
@@ -577,7 +601,6 @@ class ImmichPlugin(IcloudpdPlugin):
         if self.batch_size != 1:
             self._load_pending_files()
 
-
     @staticmethod
     def _strip_date_templates(path: str) -> str:
         """Strip date templates from a directory path.
@@ -591,11 +614,11 @@ class ImmichPlugin(IcloudpdPlugin):
             Base path with date templates removed
         """
         # Remove path components that contain % (date templates)
-        parts = path.split('/')
+        parts = path.split("/")
         # Keep only parts that don't contain %
-        base_parts = [p for p in parts if '%' not in p]
+        base_parts = [p for p in parts if "%" not in p]
         # Rejoin, ensuring we preserve leading /
-        result = '/'.join(base_parts)
+        result = "/".join(base_parts)
         # Normalize path (remove duplicate slashes, etc.)
         return str(Path(result))
 
@@ -640,11 +663,13 @@ class ImmichPlugin(IcloudpdPlugin):
             response.raise_for_status()
 
             library_data = response.json()
-            import_paths = library_data.get('importPaths', [])
+            import_paths = library_data.get("importPaths", [])
 
             if not import_paths:
                 print("Warning: Immich library has no importPaths configured", file=sys.stderr)
-                print("Please configure importPaths in your Immich library settings", file=sys.stderr)
+                print(
+                    "Please configure importPaths in your Immich library settings", file=sys.stderr
+                )
                 sys.exit(1)
 
             # Collect all directories from user configs
@@ -669,20 +694,29 @@ class ImmichPlugin(IcloudpdPlugin):
 
             # If any directories are invalid, exit with error
             if invalid_dirs:
-                print("Error: The following icloudpd directories are not within Immich library importPaths:", file=sys.stderr)
+                print(
+                    "Error: The following icloudpd directories are not within Immich library importPaths:",
+                    file=sys.stderr,
+                )
                 for invalid_dir in invalid_dirs:
                     print(f"  - {invalid_dir}", file=sys.stderr)
                 print("\nImmich library importPaths:", file=sys.stderr)
                 for import_path in import_paths:
                     print(f"  - {import_path}", file=sys.stderr)
-                print("\nAll icloudpd directories must be subdirectories of at least one Immich importPath.", file=sys.stderr)
+                print(
+                    "\nAll icloudpd directories must be subdirectories of at least one Immich importPath.",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
 
             # Success - print confirmation
             print(f"  Directory validation: OK ({len(user_directories)} directories validated)")
 
         except requests.RequestException as e:
-            print(f"Error: Failed to fetch library data for directory validation: {e}", file=sys.stderr)
+            print(
+                f"Error: Failed to fetch library data for directory validation: {e}",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     def _test_immich_connection(self) -> None:
@@ -710,12 +744,15 @@ class ImmichPlugin(IcloudpdPlugin):
             response.raise_for_status()
 
             library_data = response.json()
-            library_name = library_data.get('name', 'Unknown')
+            library_name = library_data.get("name", "Unknown")
             print(f"  Connected to Immich library: {library_name}")
 
         except requests.RequestException as e:
             print(f"Error: Failed to connect to Immich: {e}", file=sys.stderr)
-            print("Please check --immich-server-url, --immich-api-key, and --immich-library-id", file=sys.stderr)
+            print(
+                "Please check --immich-server-url, --immich-api-key, and --immich-library-id",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     # ========================================================================
@@ -739,7 +776,9 @@ class ImmichPlugin(IcloudpdPlugin):
             should_process = True
         elif self.process_existing_favorites:
             # Only process if photo is marked as favorite in iCloud
-            is_favorite = photo._asset_record.get("fields", {}).get("isFavorite", {}).get("value") == 1
+            is_favorite = (
+                photo._asset_record.get("fields", {}).get("isFavorite", {}).get("value") == 1
+            )
             if is_favorite:
                 should_process = True
                 logger.debug("Immich: Photo is favorite, will process existing file")
@@ -747,14 +786,18 @@ class ImmichPlugin(IcloudpdPlugin):
                 logger.debug("Immich: Photo is not favorite, skipping existing file")
 
         if should_process:
-            logger.debug(f"Immich: Accumulating existing file {download_size.value} - {download_path}")
-            self.current_photo_files.append({
-                'status': 'existed',
-                'path': download_path,
-                'size': download_size.value,
-                'is_live': False,
-                'photo_filename': photo_filename,
-            })
+            logger.debug(
+                f"Immich: Accumulating existing file {download_size.value} - {download_path}"
+            )
+            self.current_photo_files.append(
+                {
+                    "status": "existed",
+                    "path": download_path,
+                    "size": download_size.value,
+                    "is_live": False,
+                    "photo_filename": photo_filename,
+                }
+            )
         else:
             logger.debug("Immich: Skipping existing file (not configured to process)")
 
@@ -767,14 +810,18 @@ class ImmichPlugin(IcloudpdPlugin):
         dry_run: bool,
     ) -> None:
         """File was downloaded - always add to accumulator"""
-        logger.debug(f"Immich: Accumulating downloaded file {download_size.value} - {download_path}")
-        self.current_photo_files.append({
-            'status': 'downloaded',
-            'path': download_path,
-            'size': download_size.value,
-            'is_live': False,
-            'photo_filename': photo_filename,
-        })
+        logger.debug(
+            f"Immich: Accumulating downloaded file {download_size.value} - {download_path}"
+        )
+        self.current_photo_files.append(
+            {
+                "status": "downloaded",
+                "path": download_path,
+                "size": download_size.value,
+                "is_live": False,
+                "photo_filename": photo_filename,
+            }
+        )
 
     def on_download_complete(
         self,
@@ -927,9 +974,7 @@ class ImmichPlugin(IcloudpdPlugin):
         assert self.api_key is not None
         url = f"{self.server_url}/api/stacks"
         headers = {"x-api-key": self.api_key}
-        body = {
-            "assetIds": asset_ids
-        }
+        body = {"assetIds": asset_ids}
 
         logger.debug(f"POST {url}")
         logger.debug(f"  Stacking {len(asset_ids)} assets, primary: {asset_ids[0]}")
@@ -951,10 +996,7 @@ class ImmichPlugin(IcloudpdPlugin):
         assert self.api_key is not None
         url = f"{self.server_url}/api/assets"
         headers = {"x-api-key": self.api_key}
-        body = {
-            "ids": asset_ids,
-            "isFavorite": is_favorite
-        }
+        body = {"ids": asset_ids, "isFavorite": is_favorite}
 
         logger.debug(f"PUT {url}")
         logger.debug(f"  Setting favorite={is_favorite} for {len(asset_ids)} assets")
@@ -987,8 +1029,8 @@ class ImmichPlugin(IcloudpdPlugin):
 
         # Search for existing album
         for album in albums:
-            if album.get('albumName') == album_name:
-                album_id = album.get('id')
+            if album.get("albumName") == album_name:
+                album_id = album.get("id")
                 logger.debug(f"Found existing album: {album_name} (id: {album_id})")
                 return album_id
 
@@ -998,7 +1040,7 @@ class ImmichPlugin(IcloudpdPlugin):
         response = requests.post(url, headers=headers, json=body, timeout=30)
         response.raise_for_status()
         album_data = response.json()
-        album_id = album_data.get('id')
+        album_id = album_data.get("id")
         logger.debug(f"Created new album: {album_name} (id: {album_id})")
         return album_id
 
@@ -1051,9 +1093,7 @@ class ImmichPlugin(IcloudpdPlugin):
     # ========================================================================
 
     def _wait_for_assets(
-        self,
-        expected_files: List[Dict[str, Any]],
-        timeout: float
+        self, expected_files: List[Dict[str, Any]], timeout: float
     ) -> Dict[str, Dict[str, Any]]:
         """Wait for all expected files to appear in Immich after scan.
 
@@ -1074,7 +1114,7 @@ class ImmichPlugin(IcloudpdPlugin):
             return {}
 
         # Build set of expected paths for quick lookup
-        expected_paths = {f['path'] for f in expected_files}
+        expected_paths = {f["path"] for f in expected_files}
 
         logger.info(f"  Waiting for {len(expected_paths)} assets to appear in Immich...")
 
@@ -1084,7 +1124,9 @@ class ImmichPlugin(IcloudpdPlugin):
 
         while True:
             # Search for each file we haven't found yet
-            for file_path in list(paths_to_search):  # Use list() to avoid modification during iteration
+            for file_path in list(
+                paths_to_search
+            ):  # Use list() to avoid modification during iteration
                 asset = self._search_asset_by_path(file_path)
                 if asset:
                     found_assets[file_path] = asset
@@ -1110,9 +1152,7 @@ class ImmichPlugin(IcloudpdPlugin):
             time.sleep(self.poll_interval)
 
     def _find_assets_for_files(
-        self,
-        files: List[Dict[str, str]],
-        trigger_scan: bool = False
+        self, files: List[Dict[str, str]], trigger_scan: bool = False
     ) -> Dict[str, Dict[str, Any]]:
         """Find assets in Immich, optionally triggering scan and waiting.
 
@@ -1142,15 +1182,12 @@ class ImmichPlugin(IcloudpdPlugin):
             # Just search without scanning
             found_assets: Dict[str, Dict[str, Any]] = {}
             for file_info in files:
-                asset = self._search_asset_by_path(file_info['path'])
+                asset = self._search_asset_by_path(file_info["path"])
                 if asset:
-                    found_assets[file_info['path']] = asset
+                    found_assets[file_info["path"]] = asset
             return found_assets
 
-    def _ensure_assets_registered(
-        self,
-        files: List[Dict[str, str]]
-    ) -> Dict[str, Dict[str, Any]]:
+    def _ensure_assets_registered(self, files: List[Dict[str, str]]) -> Dict[str, Dict[str, Any]]:
         """Ensure all files are registered in Immich, scanning only if needed.
 
         This implements smart scan logic:
@@ -1206,13 +1243,13 @@ class ImmichPlugin(IcloudpdPlugin):
         # Add assets in priority order
         for priority_size in self.stack_priority:
             for asset in assets:
-                if asset['size'] == priority_size and asset['asset_id'] not in ordered_ids:
-                    ordered_ids.append(asset['asset_id'])
+                if asset["size"] == priority_size and asset["asset_id"] not in ordered_ids:
+                    ordered_ids.append(asset["asset_id"])
 
         # Add remaining assets not in priority list
         for asset in assets:
-            if asset['asset_id'] not in ordered_ids:
-                ordered_ids.append(asset['asset_id'])
+            if asset["asset_id"] not in ordered_ids:
+                ordered_ids.append(asset["asset_id"])
 
         if len(ordered_ids) <= 1:
             return
@@ -1261,8 +1298,8 @@ class ImmichPlugin(IcloudpdPlugin):
         # Find the original live photo video ID
         original_video_id = None
         for asset in assets:
-            if asset.get('live_photo_video_id'):
-                original_video_id = asset['live_photo_video_id']
+            if asset.get("live_photo_video_id"):
+                original_video_id = asset["live_photo_video_id"]
                 break
 
         if not original_video_id:
@@ -1271,15 +1308,15 @@ class ImmichPlugin(IcloudpdPlugin):
         # Associate with configured sizes
         associated_count = 0
         for asset in assets:
-            if asset['size'] not in self.associate_live_sizes:
+            if asset["size"] not in self.associate_live_sizes:
                 continue
 
             # Skip if already has this live video ID
-            if asset.get('live_photo_video_id') == original_video_id:
+            if asset.get("live_photo_video_id") == original_video_id:
                 continue
 
             try:
-                self._associate_live_photo(asset['asset_id'], original_video_id)
+                self._associate_live_photo(asset["asset_id"], original_video_id)
                 logger.info(f"  Associated live video with {asset['size']}")
                 associated_count += 1
             except requests.RequestException as e:
@@ -1289,7 +1326,9 @@ class ImmichPlugin(IcloudpdPlugin):
         if associated_count > 0:
             self.total_live_associated += associated_count
 
-    def _process_albums(self, assets: List[Dict[str, Any]], photo_created: Any, photo_filename: str) -> None:
+    def _process_albums(
+        self, assets: List[Dict[str, Any]], photo_created: Any, photo_filename: str
+    ) -> None:
         """Add assets to albums based on rules.
 
         Args:
@@ -1306,7 +1345,7 @@ class ImmichPlugin(IcloudpdPlugin):
         for rule in self.album_rules:
             # Parse the template with photo's created date
             try:
-                if '{:' in rule.template:
+                if "{:" in rule.template:
                     album_name = rule.template.format(photo_created)
                 else:
                     album_name = rule.template
@@ -1316,10 +1355,10 @@ class ImmichPlugin(IcloudpdPlugin):
 
             # Find matching assets
             for asset in assets:
-                if rule.matches(asset['size']):
+                if rule.matches(asset["size"]):
                     if album_name not in album_assignments:
                         album_assignments[album_name] = []
-                    album_assignments[album_name].append(asset['asset_id'])
+                    album_assignments[album_name].append(asset["asset_id"])
 
         # Add assets to their assigned albums
         for album_name, asset_ids in album_assignments.items():
@@ -1346,7 +1385,7 @@ class ImmichPlugin(IcloudpdPlugin):
         is_favorite: bool,
         photo_created: Any,
         photo_filename: str,
-        favorites_only: bool = False
+        favorites_only: bool = False,
     ) -> None:
         """Process a single photo group (all sizes of one photo).
 
@@ -1368,19 +1407,21 @@ class ImmichPlugin(IcloudpdPlugin):
         # Step 2: Build asset list with metadata
         assets: List[Dict[str, Any]] = []
         for file_info in files:
-            path = file_info['path']
+            path = file_info["path"]
             asset = found_assets.get(path)
 
             if not asset:
                 logger.error(f"FATAL: Asset not found for {path} (should never happen)")
                 sys.exit(1)
 
-            assets.append({
-                'size': file_info['size'],
-                'asset_id': asset.get('id'),
-                'path': path,
-                'live_photo_video_id': asset.get('livePhotoVideoId'),
-            })
+            assets.append(
+                {
+                    "size": file_info["size"],
+                    "asset_id": asset.get("id"),
+                    "path": path,
+                    "live_photo_video_id": asset.get("livePhotoVideoId"),
+                }
+            )
 
             logger.info(f"  Registered {file_info['size']}: {path} -> {asset.get('id')}")
             self.total_registered += 1
@@ -1438,7 +1479,9 @@ class ImmichPlugin(IcloudpdPlugin):
         # Note: We ALWAYS accumulate first, then decide whether to process the batch.
         # This keeps the code simple - processing a batch of 1 works fine!
 
-        logger.info(f"Immich: Accumulating {photo.filename} to batch ({len(self.current_photo_files)} files)")
+        logger.info(
+            f"Immich: Accumulating {photo.filename} to batch ({len(self.current_photo_files)} files)"
+        )
         self._accumulate_to_batch(photo)
 
         # Decide whether to process the batch now
@@ -1490,7 +1533,7 @@ class ImmichPlugin(IcloudpdPlugin):
             if log_dir:
                 os.makedirs(log_dir, exist_ok=True)
 
-            with open(self.batch_log_file, 'w') as f:
+            with open(self.batch_log_file, "w") as f:
                 json.dump(self.batch_queue, f, indent=2, default=str)
 
             logger.debug(f"Saved {len(self.batch_queue)} pending photos to {self.batch_log_file}")
@@ -1506,10 +1549,7 @@ class ImmichPlugin(IcloudpdPlugin):
             photo_ids: List of photo IDs that were successfully processed
         """
         # Remove processed photos from batch queue
-        self.batch_queue = [
-            item for item in self.batch_queue
-            if item['photo_id'] not in photo_ids
-        ]
+        self.batch_queue = [item for item in self.batch_queue if item["photo_id"] not in photo_ids]
 
         # Update log file
         self._save_pending_files()
@@ -1531,11 +1571,13 @@ class ImmichPlugin(IcloudpdPlugin):
 
         # Build batch item
         batch_item = {
-            'photo_id': photo.id,
-            'files': self.current_photo_files.copy(),  # Copy the file list
-            'is_favorite': is_favorite,
-            'created': photo.created.isoformat() if hasattr(photo.created, 'isoformat') else str(photo.created),
-            'filename': photo.filename,
+            "photo_id": photo.id,
+            "files": self.current_photo_files.copy(),  # Copy the file list
+            "is_favorite": is_favorite,
+            "created": photo.created.isoformat()
+            if hasattr(photo.created, "isoformat")
+            else str(photo.created),
+            "filename": photo.filename,
         }
 
         self.batch_queue.append(batch_item)
@@ -1569,7 +1611,8 @@ class ImmichPlugin(IcloudpdPlugin):
             try:
                 # Reconstruct photo_created from ISO string if needed
                 from datetime import datetime
-                photo_created = batch_item.get('created')
+
+                photo_created = batch_item.get("created")
                 if isinstance(photo_created, str):
                     photo_created = datetime.fromisoformat(photo_created)
 
@@ -1578,21 +1621,21 @@ class ImmichPlugin(IcloudpdPlugin):
                 # 1. All files existed (not downloaded)
                 # 2. process_existing_favorites is enabled
                 # 3. Photo is actually marked as favorite
-                all_existed = all(f['status'] == 'existed' for f in batch_item['files'])
-                is_favorite = batch_item['is_favorite']
+                all_existed = all(f["status"] == "existed" for f in batch_item["files"])
+                is_favorite = batch_item["is_favorite"]
                 favorites_only = all_existed and self.process_existing_favorites and is_favorite
 
                 # Process using unified pipeline
                 self._process_photo_group(
-                    files=batch_item['files'],
-                    photo_id=batch_item['photo_id'],
+                    files=batch_item["files"],
+                    photo_id=batch_item["photo_id"],
                     is_favorite=is_favorite,
                     photo_created=photo_created,
-                    photo_filename=batch_item.get('filename', ''),
-                    favorites_only=favorites_only
+                    photo_filename=batch_item.get("filename", ""),
+                    favorites_only=favorites_only,
                 )
 
-                successfully_processed.append(batch_item['photo_id'])
+                successfully_processed.append(batch_item["photo_id"])
 
             except Exception as e:
                 logger.error(f"Failed to process photo {batch_item['photo_id']}: {e}")

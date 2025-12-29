@@ -18,8 +18,8 @@ from icloudpd.config import GlobalConfig, UserConfig
 from icloudpd.log_level import LogLevel
 from icloudpd.mfa_provider import MFAProvider
 from icloudpd.password_provider import PasswordProvider
-from icloudpd.string_helpers import parse_timestamp_or_timedelta, splitlines
 from icloudpd.plugins.manager import PluginManager
+from icloudpd.string_helpers import parse_timestamp_or_timedelta, splitlines
 from pyicloud_ipd.file_match import FileMatchPolicy
 from pyicloud_ipd.live_photo_mov_filename_policy import LivePhotoMovFilenamePolicy
 from pyicloud_ipd.raw_policy import RawTreatmentPolicy
@@ -124,11 +124,11 @@ def add_options_for_user(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
     cloned.add_argument(
         "--favorite-to-rating",
         help="Set EXIF (and/or XMP sidecar if enabled) Rating for favorited photos (0-5). Default: %(const)s if no value specified",
-        nargs='?',
+        nargs="?",
         const=5,
         default=None,
         type=int,
-        choices=[0, 1, 2, 3, 4, 5]
+        choices=[0, 1, 2, 3, 4, 5],
     )
     cloned.add_argument(
         "--force-size",
@@ -370,23 +370,19 @@ def add_global_options(parser: argparse.ArgumentParser) -> argparse.ArgumentPars
         type=lower,
     )
 
-    plugin_group = cloned.add_argument_group('Plugin Options')
+    plugin_group = cloned.add_argument_group("Plugin Options")
     plugin_group.add_argument(
-        '--plugin',
-        action='append',
-        dest='plugins',
-        metavar='NAME',
-        help='Enable a plugin (can be used multiple times)'
+        "--plugin",
+        action="append",
+        dest="plugins",
+        metavar="NAME",
+        help="Enable a plugin (can be used multiple times)",
     )
     plugin_group.add_argument(
-        '--list-plugins',
-        action='store_true',
-        help='List available plugins and exit'
+        "--list-plugins", action="store_true", help="List available plugins and exit"
     )
     plugin_group.add_argument(
-        '--plugin-help',
-        metavar='NAME',
-        help='Show help for a specific plugin'
+        "--plugin-help", metavar="NAME", help="Show help for a specific plugin"
     )
 
     return cloned
@@ -517,8 +513,8 @@ def parse(args: Sequence[str]) -> Tuple[GlobalConfig, Sequence[UserConfig], Plug
     # Plugin handling
     plugin_manager = PluginManager()
     plugin_manager.discover()
-    
-    if '--list-plugins' in args:
+
+    if "--list-plugins" in args:
         print("Available plugins:")
         if not plugin_manager.list_available():
             print("  (none installed)")
@@ -530,9 +526,9 @@ def parse(args: Sequence[str]) -> Tuple[GlobalConfig, Sequence[UserConfig], Plug
                 except Exception as e:
                     print(f"  {name}: (error loading: {e})")
         sys.exit(0)
-    
-    if '--plugin-help' in args:
-        idx = args.index('--plugin-help')
+
+    if "--plugin-help" in args:
+        idx = args.index("--plugin-help")
         if idx + 1 < len(args):
             plugin_name = args[idx + 1]
             if plugin_name in plugin_manager.available:
@@ -540,7 +536,7 @@ def parse(args: Sequence[str]) -> Tuple[GlobalConfig, Sequence[UserConfig], Plug
                 plugin = plugin_class()
                 print(f"\n{plugin.name} Plugin - {plugin.description}")
                 print(f"Version: {plugin.version}\n")
-                
+
                 # Create temp parser to show plugin args
                 temp_parser = argparse.ArgumentParser(add_help=False)
                 plugin.add_arguments(temp_parser)
@@ -560,12 +556,14 @@ def parse(args: Sequence[str]) -> Tuple[GlobalConfig, Sequence[UserConfig], Plug
     enabled_plugins = global_ns.plugins or []
     if enabled_plugins:
         # Create a new parser with plugin arguments
-        plugin_parser = argparse.ArgumentParser(exit_on_error=False, add_help=False, allow_abbrev=False)
+        plugin_parser = argparse.ArgumentParser(
+            exit_on_error=False, add_help=False, allow_abbrev=False
+        )
         plugin_manager.add_plugin_arguments(plugin_parser, enabled_plugins)
-        
+
         # Parse plugin args (they'll be in non_global_args)
         plugin_ns, remaining_args = plugin_parser.parse_known_args(non_global_args)
-        
+
         # Merge plugin_ns into global_ns for passing to plugins later
         for key, value in vars(plugin_ns).items():
             setattr(global_ns, key, value)
@@ -721,7 +719,7 @@ def cli() -> int:
                 except Exception as e:
                     print(f"Failed to enable plugin {plugin_name}: {e}")
                     return 2
-            
+
             # Pass plugin_manager to run_with_configs
             return run_with_configs(global_ns, user_nses, plugin_manager)
 
