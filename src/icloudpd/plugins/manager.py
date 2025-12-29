@@ -44,6 +44,7 @@ class PluginManager:
         self.plugin_config: Namespace | None = None  # Stored config with plugin args
         self.global_config: GlobalConfig | None = None  # Global configuration
         self.user_configs: Sequence[UserConfig] | None = None  # User configurations
+        self._configured_plugins: set[str] = set()  # Track which plugins have been configured
     
     def discover(self) -> None:
         """Discover plugins from bundled plugins/ directory and entry points.
@@ -195,33 +196,50 @@ class PluginManager:
         1. Early (from cli.py) with just the namespace
         2. Late (from base.py) with the runtime configs
 
+        When called with runtime configs, this will configure any enabled plugins
+        that haven't been configured yet (or reconfigure with the new runtime configs).
+
         Args:
             config: Namespace with plugin arguments
             global_config: Global configuration object (optional)
             user_configs: List of user configurations (optional)
         """
         self.plugin_config = config
+
+        # Track if we're receiving runtime configs for the first time
+        had_runtime_configs = self.global_config is not None and self.user_configs is not None
+
         if global_config is not None:
             self.global_config = global_config
         if user_configs is not None:
             self.user_configs = user_configs
 
-        # Re-configure enabled plugins with new configs
-        if (global_config is not None or user_configs is not None) and self.enabled:
+        # Configure enabled plugins now that we have runtime configs
+        # Only do this if this is the first time we're receiving runtime configs
+        if not had_runtime_configs and self.global_config is not None and self.user_configs is not None and self.enabled:
             for plugin_name, plugin in self.enabled.items():
+                # Skip if already configured (this avoids double-configuration)
+                if plugin_name in self._configured_plugins:
+                    logger.debug(f"Plugin {plugin_name} already configured, skipping")
+                    continue
+
                 try:
-                    logger.debug(f"Re-configuring plugin {plugin_name} with runtime configs")
+                    logger.debug(f"Configuring plugin {plugin_name} with runtime configs")
                     plugin.configure(self.plugin_config, self.global_config, self.user_configs)
+                    self._configured_plugins.add(plugin_name)
+                    logger.info(f"Configured plugin: {plugin_name}")
                 except Exception as e:
                     logger.error(
-                        f"Failed to re-configure plugin {plugin_name} with runtime configs: {e}",
+                        f"Failed to configure plugin {plugin_name} with runtime configs: {e}",
                         exc_info=True
                     )
 
     def enable(self, name: str, config: Namespace | None = None) -> None:
         """Enable and configure a plugin.
 
-        Creates an instance of the plugin and calls its configure() method.
+        Creates an instance of the plugin and calls its configure() method with
+        available configs. If runtime configs are available later via set_plugin_config(),
+        the plugin will NOT be reconfigured (avoiding double-configuration).
 
         Args:
             name: Plugin name to enable
@@ -247,8 +265,11 @@ class PluginManager:
             plugin_class = self.available[name]
             plugin = plugin_class()
 
-            # Configure the plugin with CLI args and any available runtime configs
+            # Configure the plugin with available configs
             plugin.configure(plugin_config, self.global_config, self.user_configs)
+
+            # Mark as configured to prevent double-configuration in set_plugin_config()
+            self._configured_plugins.add(name)
 
             self.enabled[name] = plugin
             logger.info(f"Enabled plugin: {name} (v{plugin.version})")
@@ -259,7 +280,7 @@ class PluginManager:
     
     def disable(self, name: str) -> None:
         """Disable a plugin and call its cleanup method.
-        
+
         Args:
             name: Plugin name to disable
         """
@@ -269,8 +290,9 @@ class PluginManager:
                 logger.debug(f"Called cleanup for plugin: {name}")
             except Exception as e:
                 logger.warning(f"Error during {name} plugin cleanup: {e}")
-            
+
             del self.enabled[name]
+            self._configured_plugins.discard(name)
             logger.info(f"Disabled plugin: {name}")
     
     def is_enabled(self, name: str) -> bool:

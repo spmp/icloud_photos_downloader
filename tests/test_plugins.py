@@ -20,6 +20,7 @@ class MockPlugin(IcloudpdPlugin):
         self.configured = False
         self.cleaned_up = False
         self.mock_option = None
+        self.configure_count = 0
 
     @property
     def name(self) -> str:
@@ -35,6 +36,7 @@ class MockPlugin(IcloudpdPlugin):
 
     def configure(self, config: Namespace, global_config=None, user_configs=None) -> None:
         self.configured = True
+        self.configure_count += 1
         self.mock_option = getattr(config, "mock_option", None)
 
     def on_download_exists(
@@ -185,6 +187,31 @@ class TestPluginManager(unittest.TestCase):
 
         manager.disable("mock")
         self.assertFalse(manager.is_enabled("mock"))
+
+    def test_configure_called_once_with_runtime_configs(self):
+        """Test that configure is only called once when runtime configs are provided later"""
+        from unittest.mock import MagicMock
+
+        manager = PluginManager()
+        manager.available["mock"] = MockPlugin
+
+        # Step 1: Store config (like cli.py does)
+        config = Namespace(mock_option="test")
+        manager.set_plugin_config(config)
+
+        # Step 2: Enable plugin (like cli.py does) - should call configure once
+        manager.enable("mock")
+
+        plugin = manager.enabled["mock"]
+        self.assertEqual(plugin.configure_count, 1)
+
+        # Step 3: Provide runtime configs (like base.py does) - should NOT call configure again
+        mock_global_config = MagicMock()
+        mock_user_configs = [MagicMock()]
+        manager.set_plugin_config(config, mock_global_config, mock_user_configs)
+
+        # Verify configure was still only called once
+        self.assertEqual(plugin.configure_count, 1)
 
     def test_add_plugin_arguments(self):
         """Test adding plugin arguments to parser"""
