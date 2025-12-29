@@ -585,7 +585,7 @@ class CliTestCase(TestCase):
                 log_text = "\n".join(
                     line
                     for line in self._caplog.text.split("\n")
-                    if "Discovered plugin:" not in line
+                    if "Discovered plugin" not in line
                 )
                 self.assertNotIn(text, log_text)
 

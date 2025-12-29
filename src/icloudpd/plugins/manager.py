@@ -31,10 +31,12 @@ class PluginManager:
 
     Usage:
         >>> manager = PluginManager()
-        >>> manager.discover()  # Find all installed plugins
-        >>> print(manager.list_available())  # ['demo', 'immich', ...]
-        >>> manager.enable("demo", config)  # Enable a plugin
-        >>> manager.call_hook("on_photo_downloaded", ...)  # Call hooks
+        >>> manager.discover()  # Find all installed plugins  # doctest: +SKIP
+        >>> manager.list_available()  # doctest: +SKIP
+        ['demo', 'immich', ...]
+        >>> from argparse import Namespace  # doctest: +SKIP
+        >>> manager.enable("demo", Namespace())  # Enable a plugin  # doctest: +SKIP
+        >>> manager.call_hook("on_photo_downloaded")  # Call hooks  # doctest: +SKIP
     """
 
     def __init__(self):
@@ -100,7 +102,6 @@ class PluginManager:
         Args:
             directory: Path to directory containing plugin packages
         """
-        logger.debug(f"Scanning for plugins in: {directory}")
 
         # Add parent directory to sys.path so we can import plugins.* modules
         plugins_parent = str(directory.parent)
@@ -149,7 +150,7 @@ class PluginManager:
 
                 # Register the plugin class
                 self.available[plugin_name] = obj
-                logger.info(
+                logger.debug(
                     f"Discovered plugin: {plugin_name} (from {source_name}, v{temp_instance.version})"
                 )
 
@@ -349,14 +350,14 @@ class PluginManager:
             **kwargs: Arguments to pass to the hook
 
         Example:
-            >>> manager.call_hook(
-            ...     "on_photo_downloaded",
-            ...     photo_id="ABC123",
-            ...     photo_filename="IMG_1234.jpg",
-            ...     downloaded_files=[...],
-            ...     is_favorite=True,
-            ...     metadata={...},
-            ... )
+            manager.call_hook(
+                "on_photo_downloaded",
+                photo_id="ABC123",
+                photo_filename="IMG_1234.jpg",
+                downloaded_files=[...],
+                is_favorite=True,
+                metadata={...},
+            )
         """
         for plugin_name, plugin in self.enabled.items():
             method = getattr(plugin, hook_name, None)

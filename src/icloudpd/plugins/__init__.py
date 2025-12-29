@@ -60,11 +60,13 @@ Available Hooks:
     - on_run_completed
 
 Usage:
+    >>> from argparse import Namespace
     >>> from icloudpd.plugins.manager import PluginManager
     >>> manager = PluginManager()
-    >>> manager.discover()
-    >>> manager.enable("demo", config)
-    >>> manager.call_hook('on_download_complete', download_path='/path/to/file', ...)
+    >>> manager.discover()  # doctest: +SKIP
+    >>> config = Namespace()  # doctest: +SKIP
+    >>> manager.enable("demo", config)  # doctest: +SKIP
+    >>> manager.call_hook('on_download_complete', download_path='/path/to/file')  # doctest: +SKIP
 """
 
 from icloudpd.plugins.base import IcloudpdPlugin
