@@ -91,25 +91,25 @@ def _parse_sizes(value: str | None) -> List[str]:
     return items
 
 
-def _parse_batch_size(value: str | None) -> int | str:
+def _parse_batch_size(value: str | None) -> int:
     """Parse batch size argument.
 
     Args:
         value: Batch size value - None, 'all', or an integer string
 
     Returns:
-        'all' or integer batch size
+        Integer batch size where 0='all', 1=immediate (default), N=batch every N
 
     Raises:
         argparse.ArgumentTypeError: If invalid value
     """
-    # No argument (--immich-batch-process with no value) → process all at end
+    # No argument (--immich-batch-process with no value) → process all at end (0)
     if value is None:
-        return 'all'
+        return 0
 
-    # Explicit 'all'
+    # Explicit 'all' → 0
     if value.lower() == 'all':
-        return 'all'
+        return 0
 
     # Try to parse as integer
     try:
@@ -119,10 +119,39 @@ def _parse_batch_size(value: str | None) -> int | str:
                 f"Batch size must be >= 1, got {batch_size}"
             )
         return batch_size
-    except ValueError:
+    except ValueError as e:
         raise argparse.ArgumentTypeError(
             f"Invalid batch size: {value}. Use 'all' or a positive integer"
-        )
+        ) from e
+
+
+# ============================================================================
+# Pure Helper Functions
+# ============================================================================
+
+def _has_new_files(files: List[Dict]) -> bool:
+    """Check if any files were newly downloaded (vs existed).
+
+    Args:
+        files: List of file info dicts with 'status' key
+
+    Returns:
+        True if any file has status 'downloaded'
+    """
+    return any(f['status'] == 'downloaded' for f in files)
+
+
+def _get_asset_ids_for_sizes(assets: List[Dict[str, Any]], target_sizes: List[str]) -> List[str]:
+    """Extract asset IDs for specific sizes from asset list.
+
+    Args:
+        assets: List of asset dicts with 'size' and 'asset_id' keys
+        target_sizes: List of size names to extract
+
+    Returns:
+        List of asset IDs matching target sizes
+    """
+    return [a['asset_id'] for a in assets if a['size'] in target_sizes]
 
 
 # ============================================================================
@@ -246,8 +275,8 @@ class ImmichPlugin(IcloudpdPlugin):
         self.poll_interval: float = 1.0
 
         # Batch processing configuration
-        self.batch_process_enabled: bool = False
-        self.batch_size: int | str = 1  # Default: process each photo immediately (batch of 1)
+        # batch_size: 0='all' (process at end), 1=immediate (default), N=batch every N photos
+        self.batch_size: int = 1
         self.batch_log_file: str = os.path.expanduser('~/.pyicloud/immich_pending_files.json')
 
         # Stacking configuration
@@ -266,13 +295,6 @@ class ImmichPlugin(IcloudpdPlugin):
         # Accumulators for current photo being processed
         # Each entry: {'status': 'downloaded'|'existed', 'path': str, 'size': str, 'is_live': bool, 'photo_filename': str}
         self.current_photo_files: List[Dict[str, Any]] = []
-
-        # Will be populated with Immich asset IDs after registration
-        # Each entry: {'size': str, 'asset_id': str, 'path': str, 'is_live': bool, 'live_photo_video_id': Optional[str]}
-        self.current_immich_assets: List[Dict[str, Any]] = []
-
-        # Track which asset has the original live photo video (for association with other sizes)
-        self.live_photo_filename: str | None = None
 
         # Batch queue for accumulating photos before processing
         # Each entry: {'photo_id': str, 'files': List[Dict], 'is_favorite': bool, 'created': datetime, ...}
@@ -455,8 +477,7 @@ class ImmichPlugin(IcloudpdPlugin):
         # Batch processing configuration
         batch_arg = getattr(config, 'immich_batch_process', False)
         if batch_arg is not False:
-            self.batch_process_enabled = True
-            self.batch_size = batch_arg  # Will be 'all' or integer N
+            self.batch_size = batch_arg  # Will be int: 0='all', 1=immediate, N=batch every N
 
         # Batch log file
         batch_log_file_arg = getattr(config, 'immich_batch_log_file', None)
@@ -528,9 +549,9 @@ class ImmichPlugin(IcloudpdPlugin):
         print(f"  Library ID:               {self.library_id}")
         print(f"  Process Existing:         {self.process_existing}")
         print(f"  Process Existing Favs:    {self.process_existing_favorites}")
-        print(f"  Batch Processing:         {self.batch_process_enabled}")
-        if self.batch_process_enabled:
-            print(f"  Batch Size:               {self.batch_size}")
+        batch_desc = "all (at end)" if self.batch_size == 0 else ("immediate" if self.batch_size == 1 else f"every {self.batch_size} photos")
+        print(f"  Batch Processing:         {batch_desc}")
+        if self.batch_size != 1:
             print(f"  Batch Log File:           {self.batch_log_file}")
         print(f"  Scan Timeout:             {self.scan_timeout}s")
         print(f"  Poll interval:            {self.poll_interval}s")
@@ -552,8 +573,8 @@ class ImmichPlugin(IcloudpdPlugin):
             if user_configs is not None:
                 self._validate_directories(user_configs)
 
-        # Load pending files from previous run if batch processing is enabled
-        if self.batch_process_enabled:
+        # Load pending files from previous run if batch processing is enabled (batch_size != 1)
+        if self.batch_size != 1:
             self._load_pending_files()
 
 
@@ -721,9 +742,9 @@ class ImmichPlugin(IcloudpdPlugin):
             is_favorite = photo._asset_record.get("fields", {}).get("isFavorite", {}).get("value") == 1
             if is_favorite:
                 should_process = True
-                logger.debug(f"Immich: Photo is favorite, will process existing file")
+                logger.debug("Immich: Photo is favorite, will process existing file")
             else:
-                logger.debug(f"Immich: Photo is not favorite, skipping existing file")
+                logger.debug("Immich: Photo is not favorite, skipping existing file")
 
         if should_process:
             logger.debug(f"Immich: Accumulating existing file {download_size.value} - {download_path}")
@@ -1088,235 +1109,177 @@ class ImmichPlugin(IcloudpdPlugin):
             # Sleep before next poll
             time.sleep(self.poll_interval)
 
-    # ========================================================================
-    # Main Processing Hook
-    # ========================================================================
-
-    def on_download_all_sizes_complete(
+    def _find_assets_for_files(
         self,
-        photo: PhotoAsset,
-        dry_run: bool,
-    ) -> None:
-        """Process all accumulated files after all sizes are downloaded.
-
-        With batch processing enabled, files are accumulated to batch queue instead
-        of being processed immediately. Processing happens when batch size is reached
-        or at end of run (on_run_completed).
-
-        Without batch processing (default), workflow:
-        1. If all files existed (not downloaded), check if assets already registered
-           - If all assets found, skip library scan (optimization)
-           - If any assets missing, trigger scan
-        2. Otherwise, trigger library scan
-        3. Wait for all files to appear in Immich (if scan was triggered)
-        4. Stack size variants (if enabled)
-        5. Associate live photos with other sizes (if enabled)
-        6. Mark favorites (if enabled and photo is iCloud favorite)
-        7. Add to albums based on rules
-        8. Clear accumulators
+        files: List[Dict[str, str]],
+        trigger_scan: bool = False
+    ) -> Dict[str, Dict[str, Any]]:
+        """Find assets in Immich, optionally triggering scan and waiting.
 
         Args:
-            photo: PhotoAsset with metadata (for favorite status, date, etc.)
-            dry_run: If True, only log what would happen
+            files: List of file info dicts with 'path' key
+            trigger_scan: If True, trigger library scan and wait for assets
+
+        Returns:
+            Mapping of path -> asset info (includes 'id', 'originalPath', 'livePhotoVideoId', etc.)
+
+        Raises:
+            SystemExit: If scan triggered and timeout exceeded before all assets found
         """
-        # Validate required configuration (should be guaranteed by configure())
-        assert self.server_url is not None
-        assert self.api_key is not None
-        assert self.library_id is not None
-
-        # Skip if no files to process
-        if not self.current_photo_files:
-            logger.debug(f"Immich: No files to process for {photo.filename}")
-            return
-
-        # BATCH PROCESSING MODE: Accumulate instead of processing immediately
-        if self.batch_process_enabled:
-            logger.info(f"Immich: Accumulating {photo.filename} to batch ({len(self.current_photo_files)} files)")
-
-            # Dry run mode - just log and clear
-            if dry_run:
-                for file_info in self.current_photo_files:
-                    logger.info(f"  [DRY RUN] Would accumulate {file_info['size']}: {file_info['path']}")
-                self.current_photo_files.clear()
-                return
-
-            # Accumulate to batch queue
-            self._accumulate_to_batch(photo)
-
-            # Check if batch is ready to process
-            if self._should_process_batch():
-                logger.info(f"Batch size ({self.batch_size}) reached, processing batch now")
-                self._process_batch()
-
-            return
-
-        # IMMEDIATE PROCESSING MODE (original behavior)
-        self.total_photos += 1
-        logger.info(f"Immich: Processing {photo.filename} ({len(self.current_photo_files)} files)")
-
-        # Dry run mode - just log and clear
-        if dry_run:
-            for file_info in self.current_photo_files:
-                logger.info(f"  [DRY RUN] Would register {file_info['size']}: {file_info['path']}")
-            logger.info("  [DRY RUN] Would trigger library scan and wait for assets")
-            self.current_photo_files.clear()
-            self.live_photo_filename = None
-            return
-
-        # Optimization: If all files already existed, check if assets exist before scanning
-        all_files_existed = all(f['status'] == 'existed' for f in self.current_photo_files)
-        found_assets: Dict[str, Dict[str, Any]] = {}
-
-        if all_files_existed:
-            logger.info(f"  All files already existed, checking if assets already registered...")
-            # Try to find all assets without triggering a scan
-            for file_info in self.current_photo_files:
-                asset = self._search_asset_by_path(file_info['path'])
-                if asset:
-                    found_assets[file_info['path']] = asset
-
-            # If we found all assets, skip the scan
-            if len(found_assets) == len(self.current_photo_files):
-                logger.info(f"  All {len(found_assets)} assets already registered, skipping scan")
-            else:
-                # Some assets missing, need to scan
-                logger.info(f"  Found {len(found_assets)}/{len(self.current_photo_files)} assets, triggering scan for missing files")
-                found_assets = {}  # Clear and do full scan workflow
-
-        # Step 1 & 2: Trigger scan and wait (if needed)
-        if not found_assets:  # Empty dict means we need to scan
-            # Step 1: Trigger library scan
-            logger.info(f"  Triggering library scan for {len(self.current_photo_files)} files")
+        if trigger_scan:
+            # Trigger scan and wait for all assets
+            logger.info(f"  Triggering library scan for {len(files)} files")
             try:
+                assert self.library_id is not None
                 self._trigger_library_scan(self.library_id)
             except requests.RequestException as e:
                 logger.error(f"FATAL: Failed to trigger library scan: {e}")
                 sys.exit(1)
 
-            # Step 2: Wait for all files to appear in Immich
-            try:
-                found_assets = self._wait_for_assets(
-                    expected_files=self.current_photo_files,
-                    timeout=self.scan_timeout
-                )
-            except SystemExit:
-                raise  # Timeout - exit icloudpd
+            # Wait for all files to appear
+            return self._wait_for_assets(expected_files=files, timeout=self.scan_timeout)
+        else:
+            # Just search without scanning
+            found_assets: Dict[str, Dict[str, Any]] = {}
+            for file_info in files:
+                asset = self._search_asset_by_path(file_info['path'])
+                if asset:
+                    found_assets[file_info['path']] = asset
+            return found_assets
 
-        # Step 3: Build current_immich_assets from found assets
-        for file_info in self.current_photo_files:
-            path = file_info['path']
-            asset = found_assets.get(path)
+    def _ensure_assets_registered(
+        self,
+        files: List[Dict[str, str]]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Ensure all files are registered in Immich, scanning only if needed.
 
-            if not asset:
-                logger.error(f"FATAL: Asset not found for {path} after scan (should never happen)")
-                logger.error("This indicates a critical issue with Immich asset registration")
-                sys.exit(1)
+        This implements smart scan logic:
+        - If any files are newly downloaded, always scan (they won't exist yet)
+        - If all files existed, search first without scanning
+        - If all found, skip scan (optimization)
+        - If some missing, then trigger scan
 
-            # Get livePhotoVideoId from asset metadata (not from our tracking)
-            live_photo_video_id = asset.get('livePhotoVideoId')
+        Args:
+            files: List of file info dicts with 'status' and 'path' keys
 
-            self.current_immich_assets.append({
-                'size': file_info['size'],
-                'asset_id': asset.get('id'),
-                'path': path,
-                'live_photo_video_id': live_photo_video_id,
-            })
+        Returns:
+            Mapping of path -> asset info for all files
 
-            logger.info(f"  Registered {file_info['size']}: {path} -> {asset.get('id')}")
-            self.total_registered += 1
-
-        # Step 4: Stack size variants (if enabled)
-        if self.stack_media:
-            self._stack_size_variants()
-
-        # Step 5: Associate live photos with other sizes (if enabled and live photo exists)
-        if self.associate_live_sizes and self.live_photo_filename:
-            self._associate_live_photos()
-
-        # Step 6: Mark favorites (if enabled and photo is iCloud favorite)
-        is_favorite = photo._asset_record.get("fields", {}).get("isFavorite", {}).get("value") == 1
-        if self.favorite_sizes and is_favorite:
-            self._mark_favorites()
-
-        # Step 7: Add to albums based on rules
-        if self.album_rules:
-            self._apply_album_rules(photo)
-
-        # Clear accumulators for next photo
-        self.current_photo_files.clear()
-        self.current_immich_assets.clear()
-        self.live_photo_filename = None
-
-    def _stack_size_variants(self) -> None:
-        """Stack size variants based on priority configuration.
-
-        Creates an ordered list of asset IDs based on stack_priority config.
-        First asset in the list becomes the primary (Immich uses first as primary).
+        Raises:
+            SystemExit: If scan needed and timeout exceeded
         """
-        if len(self.current_immich_assets) <= 1:
-            logger.debug("  No size variants to stack (only 1 asset)")
+        has_new = _has_new_files(files)
+
+        if has_new:
+            # New files require scan
+            logger.info("  New files detected, triggering scan")
+            return self._find_assets_for_files(files, trigger_scan=True)
+
+        # All files existed - check first without scanning
+        logger.info("  All files already existed, checking if assets already registered...")
+        found = self._find_assets_for_files(files, trigger_scan=False)
+
+        if len(found) == len(files):
+            logger.info(f"  All {len(found)} assets already registered, skipping scan")
+            return found
+
+        # Some assets missing - need to scan
+        logger.info(f"  Found {len(found)}/{len(files)} assets, triggering scan for missing files")
+        return self._find_assets_for_files(files, trigger_scan=True)
+
+    # ========================================================================
+    # Post-Processing Functions
+    # ========================================================================
+
+    def _process_stacking(self, assets: List[Dict[str, Any]]) -> None:
+        """Create stacks for size variants.
+
+        Args:
+            assets: List of asset dicts with 'size' and 'asset_id' keys
+        """
+        if not self.stack_media or len(assets) <= 1:
             return
 
-        # Build ordered list of asset IDs based on stack_priority
-        # First in list = primary (Immich convention)
-        ordered_asset_ids = []
+        # Build priority-ordered list of asset IDs
+        ordered_ids = []
 
         # Add assets in priority order
-        for size in self.stack_priority:
-            for asset in self.current_immich_assets:
-                if asset['size'] == size:
-                    ordered_asset_ids.append(asset['asset_id'])
-                    break  # Only add each size once
+        for priority_size in self.stack_priority:
+            for asset in assets:
+                if asset['size'] == priority_size and asset['asset_id'] not in ordered_ids:
+                    ordered_ids.append(asset['asset_id'])
 
-        # Add any remaining assets not in priority list (shouldn't happen but be safe)
-        for asset in self.current_immich_assets:
-            if asset['asset_id'] not in ordered_asset_ids:
-                ordered_asset_ids.append(asset['asset_id'])
+        # Add remaining assets not in priority list
+        for asset in assets:
+            if asset['asset_id'] not in ordered_ids:
+                ordered_ids.append(asset['asset_id'])
 
-        if len(ordered_asset_ids) <= 1:
-            logger.debug("  No size variants to stack (only 1 asset after ordering)")
+        if len(ordered_ids) <= 1:
             return
 
-        # Create stack with ordered IDs (first = primary)
+        # Create stack
         try:
-            self._create_stack(ordered_asset_ids)
-            logger.info(f"  Stacked {len(ordered_asset_ids)} size variants (primary: {ordered_asset_ids[0]})")
+            self._create_stack(ordered_ids)
+            logger.info(f"  Stacked {len(ordered_ids)} size variants")
             self.total_stacked += 1
         except requests.RequestException as e:
             logger.error(f"FATAL: Failed to create stack: {e}")
             sys.exit(1)
 
-    def _associate_live_photos(self) -> None:
-        """Associate live photo video with other size variants.
+    def _process_favoriting(self, assets: List[Dict[str, Any]], is_favorite: bool) -> None:
+        """Mark configured sizes as favorite.
 
-        Finds the livePhotoVideoId from one asset and applies it to other sizes.
+        Args:
+            assets: List of asset dicts with 'size' and 'asset_id' keys
+            is_favorite: Whether photo is marked favorite in iCloud
         """
-        # Find the asset with livePhotoVideoId (typically original size)
-        live_video_id = None
-        for asset in self.current_immich_assets:
+        if not self.favorite_sizes or not is_favorite:
+            return
+
+        asset_ids = _get_asset_ids_for_sizes(assets, self.favorite_sizes)
+
+        if not asset_ids:
+            return
+
+        try:
+            self._set_favorite(asset_ids, True)
+            logger.info(f"  Marked {len(asset_ids)} assets as favorite")
+            self.total_favorited += len(asset_ids)
+        except requests.RequestException as e:
+            logger.error(f"FATAL: Failed to mark favorites: {e}")
+            sys.exit(1)
+
+    def _process_live_association(self, assets: List[Dict[str, Any]]) -> None:
+        """Associate live photo video with size variants.
+
+        Args:
+            assets: List of asset dicts with 'size', 'asset_id', and 'live_photo_video_id' keys
+        """
+        if not self.associate_live_sizes:
+            return
+
+        # Find the original live photo video ID
+        original_video_id = None
+        for asset in assets:
             if asset.get('live_photo_video_id'):
-                live_video_id = asset['live_photo_video_id']
-                logger.debug(f"  Found live video ID: {live_video_id} from {asset['size']}")
+                original_video_id = asset['live_photo_video_id']
                 break
 
-        if not live_video_id:
-            logger.debug("  No live photo video ID found, skipping association")
+        if not original_video_id:
             return
 
         # Associate with configured sizes
         associated_count = 0
-        for asset in self.current_immich_assets:
-            # Skip if this size is not in the association list
+        for asset in assets:
             if asset['size'] not in self.associate_live_sizes:
                 continue
 
             # Skip if already has this live video ID
-            if asset.get('live_photo_video_id') == live_video_id:
+            if asset.get('live_photo_video_id') == original_video_id:
                 continue
 
-            # Associate the live video with this asset
             try:
-                self._associate_live_photo(asset['asset_id'], live_video_id)
+                self._associate_live_photo(asset['asset_id'], original_video_id)
                 logger.info(f"  Associated live video with {asset['size']}")
                 associated_count += 1
             except requests.RequestException as e:
@@ -1326,35 +1289,17 @@ class ImmichPlugin(IcloudpdPlugin):
         if associated_count > 0:
             self.total_live_associated += associated_count
 
-    def _mark_favorites(self) -> None:
-        """Mark configured sizes as favorite based on iCloud favorite status."""
-        # Collect asset IDs for configured favorite sizes
-        asset_ids_to_favorite = []
-
-        for asset in self.current_immich_assets:
-            # Check if this size should be favorited
-            if asset['size'] in self.favorite_sizes:
-                asset_ids_to_favorite.append(asset['asset_id'])
-
-        if not asset_ids_to_favorite:
-            logger.debug("  No assets matched favorite size criteria")
-            return
-
-        # Mark as favorite
-        try:
-            self._set_favorite(asset_ids_to_favorite, True)
-            logger.info(f"  Marked {len(asset_ids_to_favorite)} assets as favorite")
-            self.total_favorited += len(asset_ids_to_favorite)
-        except requests.RequestException as e:
-            logger.error(f"FATAL: Failed to mark favorites: {e}")
-            sys.exit(1)
-
-    def _apply_album_rules(self, photo: PhotoAsset) -> None:
-        """Apply all album rules to determine which assets go in which albums.
+    def _process_albums(self, assets: List[Dict[str, Any]], photo_created: Any, photo_filename: str) -> None:
+        """Add assets to albums based on rules.
 
         Args:
-            photo: PhotoAsset for date/metadata substitution in album templates
+            assets: List of asset dicts with 'size' and 'asset_id' keys
+            photo_created: Photo creation date for template substitution
+            photo_filename: Photo filename for logging
         """
+        if not self.album_rules:
+            return
+
         # Build a map of album_name -> [asset_ids]
         album_assignments: Dict[str, List[str]] = {}
 
@@ -1362,7 +1307,7 @@ class ImmichPlugin(IcloudpdPlugin):
             # Parse the template with photo's created date
             try:
                 if '{:' in rule.template:
-                    album_name = rule.template.format(photo.created)
+                    album_name = rule.template.format(photo_created)
                 else:
                     album_name = rule.template
             except (AttributeError, ValueError, KeyError) as e:
@@ -1370,15 +1315,11 @@ class ImmichPlugin(IcloudpdPlugin):
                 continue
 
             # Find matching assets
-            matching_asset_ids = []
-            for asset in self.current_immich_assets:
+            for asset in assets:
                 if rule.matches(asset['size']):
-                    matching_asset_ids.append(asset['asset_id'])
-
-            if matching_asset_ids:
-                if album_name not in album_assignments:
-                    album_assignments[album_name] = []
-                album_assignments[album_name].extend(matching_asset_ids)
+                    if album_name not in album_assignments:
+                        album_assignments[album_name] = []
+                    album_assignments[album_name].append(asset['asset_id'])
 
         # Add assets to their assigned albums
         for album_name, asset_ids in album_assignments.items():
@@ -1395,6 +1336,119 @@ class ImmichPlugin(IcloudpdPlugin):
                 sys.exit(1)
 
     # ========================================================================
+    # Main Processing Pipeline
+    # ========================================================================
+
+    def _process_photo_group(
+        self,
+        files: List[Dict[str, str]],
+        photo_id: str,
+        is_favorite: bool,
+        photo_created: Any,
+        photo_filename: str,
+        favorites_only: bool = False
+    ) -> None:
+        """Process a single photo group (all sizes of one photo).
+
+        This is the unified pipeline used by both immediate and batch processing modes.
+
+        Args:
+            files: List of file info dicts with 'status', 'path', 'size' keys
+            photo_id: Photo ID for logging
+            is_favorite: Whether photo is marked favorite in iCloud
+            photo_created: Photo creation date for album template substitution
+            photo_filename: Photo filename for logging
+            favorites_only: If True, only process favoriting (skip stacking/albums/live)
+        """
+        logger.info(f"  Processing photo group: {photo_filename}")
+
+        # Step 1: Ensure all files are registered in Immich
+        found_assets = self._ensure_assets_registered(files)
+
+        # Step 2: Build asset list with metadata
+        assets: List[Dict[str, Any]] = []
+        for file_info in files:
+            path = file_info['path']
+            asset = found_assets.get(path)
+
+            if not asset:
+                logger.error(f"FATAL: Asset not found for {path} (should never happen)")
+                sys.exit(1)
+
+            assets.append({
+                'size': file_info['size'],
+                'asset_id': asset.get('id'),
+                'path': path,
+                'live_photo_video_id': asset.get('livePhotoVideoId'),
+            })
+
+            logger.info(f"  Registered {file_info['size']}: {path} -> {asset.get('id')}")
+            self.total_registered += 1
+
+        # Step 3: Post-processing
+        if favorites_only:
+            # Only favorite (for existing favorites mode)
+            self._process_favoriting(assets, is_favorite)
+        else:
+            # Full processing pipeline
+            self._process_stacking(assets)
+            self._process_live_association(assets)
+            self._process_favoriting(assets, is_favorite)
+            self._process_albums(assets, photo_created, photo_filename)
+
+        self.total_photos += 1
+
+    # ========================================================================
+    # Main Processing Hook
+    # ========================================================================
+
+    def on_download_all_sizes_complete(
+        self,
+        photo: PhotoAsset,
+        dry_run: bool,
+    ) -> None:
+        """Process all accumulated files after all sizes are downloaded.
+
+        Args:
+            photo: PhotoAsset with metadata (for favorite status, date, etc.)
+            dry_run: If True, only log what would happen
+        """
+        # Validate required configuration (should be guaranteed by configure())
+        assert self.server_url is not None
+        assert self.api_key is not None
+        assert self.library_id is not None
+
+        # Skip if no files to process
+        if not self.current_photo_files:
+            logger.debug(f"Immich: No files to process for {photo.filename}")
+            return
+
+        # Dry run mode - just log and clear
+        if dry_run:
+            for file_info in self.current_photo_files:
+                logger.info(f"  [DRY RUN] Would process {file_info['size']}: {file_info['path']}")
+            self.current_photo_files.clear()
+            return
+
+        # Batch processing logic:
+        # - batch_size == 0 ('all'): Accumulate all photos, process at end (on_run_completed)
+        # - batch_size == 1 (default): Process immediately (accumulate + process batch of 1)
+        # - batch_size > 1: Accumulate until batch size reached, then process batch
+        #
+        # Note: We ALWAYS accumulate first, then decide whether to process the batch.
+        # This keeps the code simple - processing a batch of 1 works fine!
+
+        logger.info(f"Immich: Accumulating {photo.filename} to batch ({len(self.current_photo_files)} files)")
+        self._accumulate_to_batch(photo)
+
+        # Decide whether to process the batch now
+        # batch_size == 0: Never process (wait for on_run_completed)
+        # batch_size >= 1: Process when batch queue reaches batch_size
+        if self.batch_size > 0 and len(self.batch_queue) >= self.batch_size:
+            logger.info(f"Batch size ({self.batch_size}) reached, processing batch now")
+            self._process_batch()
+
+    # ========================================================================
     # Batch Processing Methods
     # ========================================================================
 
@@ -1409,17 +1463,17 @@ class ImmichPlugin(IcloudpdPlugin):
             return
 
         try:
-            with open(self.batch_log_file, 'r') as f:
+            with open(self.batch_log_file) as f:
                 pending_data = json.load(f)
 
             if pending_data:
                 self.batch_queue = pending_data
                 logger.info(f"Loaded {len(self.batch_queue)} pending photos from previous run")
-                logger.info(f"These will be processed first before new photos")
+                logger.info("These will be processed first before new photos")
             else:
                 logger.debug("Pending batch file is empty")
 
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.warning(f"Failed to load pending batch file: {e}")
             logger.warning("Starting with empty batch queue")
             self.batch_queue = []
@@ -1441,7 +1495,7 @@ class ImmichPlugin(IcloudpdPlugin):
 
             logger.debug(f"Saved {len(self.batch_queue)} pending photos to {self.batch_log_file}")
 
-        except (IOError, OSError) as e:
+        except OSError as e:
             logger.error(f"Failed to save pending batch file: {e}")
             logger.error("Progress may be lost if process is interrupted")
 
@@ -1493,120 +1547,56 @@ class ImmichPlugin(IcloudpdPlugin):
         # Clear current photo files for next photo
         self.current_photo_files.clear()
 
-    def _should_process_batch(self) -> bool:
-        """Check if batch should be processed now.
-
-        Returns:
-            True if batch is ready to process, False otherwise
-        """
-        # If batch_size is 'all', never process until on_run_completed
-        if self.batch_size == 'all':
-            return False
-
-        # Otherwise check if we've accumulated enough photos
-        return len(self.batch_queue) >= self.batch_size
-
     def _process_batch(self) -> None:
         """Process all photos in the current batch queue.
 
-        This performs the same operations as on_download_all_sizes_complete
-        but for multiple photos at once, triggering library scan only once
-        per batch instead of once per photo.
+        Uses the unified _process_photo_group pipeline for each photo.
         """
+        # Validate required configuration (should be guaranteed by configure())
+        assert self.server_url is not None
+        assert self.api_key is not None
+        assert self.library_id is not None
+
         if not self.batch_queue:
             logger.debug("Batch queue is empty, nothing to process")
             return
 
         logger.info(f"Processing batch of {len(self.batch_queue)} photos")
-
-        # Collect all files from all photos in batch
-        all_files_to_register = []
-        photo_metadata = []  # Keep metadata for post-processing
-
-        for batch_item in self.batch_queue:
-            all_files_to_register.extend(batch_item['files'])
-            photo_metadata.append(batch_item)
-
-        if not all_files_to_register:
-            logger.info("No files to register in batch")
-            self._clear_processed_from_log([item['photo_id'] for item in self.batch_queue])
-            return
-
-        logger.info(f"Triggering library scan for {len(all_files_to_register)} files")
-
-        # Trigger library scan once for entire batch
-        try:
-            self._trigger_library_scan(self.library_id)
-        except requests.RequestException as e:
-            logger.error(f"FATAL: Failed to trigger library scan: {e}")
-            sys.exit(1)
-
-        # Wait for all files to appear in Immich
-        try:
-            found_assets = self._wait_for_assets(
-                expected_files=all_files_to_register,
-                timeout=self.scan_timeout
-            )
-        except SystemExit:
-            raise  # Timeout - exit icloudpd
-
-        # Process each photo's assets (stacking, favoriting, albums)
         successfully_processed = []
 
-        for batch_item in photo_metadata:
-            photo_id = batch_item['photo_id']
-            photo_files = batch_item['files']
-
-            # Build current_immich_assets for this photo
-            self.current_immich_assets = []
-
-            for file_info in photo_files:
-                path = file_info['path']
-                asset = found_assets.get(path)
-
-                if not asset:
-                    logger.error(f"Asset not found for {path} after scan (photo {photo_id})")
-                    continue
-
-                live_photo_video_id = asset.get('livePhotoVideoId')
-
-                self.current_immich_assets.append({
-                    'size': file_info['size'],
-                    'asset_id': asset.get('id'),
-                    'path': path,
-                    'live_photo_video_id': live_photo_video_id,
-                })
-
-                logger.info(f"  Registered {file_info['size']} for {photo_id}: {asset.get('id')}")
-                self.total_registered += 1
-
-            # Skip post-processing if no assets were registered
-            if not self.current_immich_assets:
-                logger.warning(f"No assets registered for photo {photo_id}, skipping post-processing")
-                continue
-
-            # Stack size variants (if enabled)
-            if self.stack_media:
-                self._stack_size_variants()
-
-            # Mark favorites (if enabled and photo is favorite)
-            if self.favorite_sizes and batch_item['is_favorite']:
-                self._mark_favorites()
-
-            # Apply album rules (need to reconstruct minimal photo object)
-            if self.album_rules:
-                # Create a minimal mock photo object with just the metadata we need
+        # Process each photo in the batch using unified pipeline
+        for batch_item in self.batch_queue:
+            try:
+                # Reconstruct photo_created from ISO string if needed
                 from datetime import datetime
-                mock_photo = type('PhotoAsset', (), {
-                    'created': datetime.fromisoformat(batch_item['created']) if isinstance(batch_item['created'], str) else batch_item['created'],
-                    'filename': batch_item.get('filename', ''),
-                })()
-                self._apply_album_rules(mock_photo)
+                photo_created = batch_item.get('created')
+                if isinstance(photo_created, str):
+                    photo_created = datetime.fromisoformat(photo_created)
 
-            # Clear for next photo
-            self.current_immich_assets.clear()
-            self.total_photos += 1
-            successfully_processed.append(photo_id)
+                # Calculate favorites_only flag for this batch item
+                # Same logic as immediate mode:
+                # 1. All files existed (not downloaded)
+                # 2. process_existing_favorites is enabled
+                # 3. Photo is actually marked as favorite
+                all_existed = all(f['status'] == 'existed' for f in batch_item['files'])
+                is_favorite = batch_item['is_favorite']
+                favorites_only = all_existed and self.process_existing_favorites and is_favorite
+
+                # Process using unified pipeline
+                self._process_photo_group(
+                    files=batch_item['files'],
+                    photo_id=batch_item['photo_id'],
+                    is_favorite=is_favorite,
+                    photo_created=photo_created,
+                    photo_filename=batch_item.get('filename', ''),
+                    favorites_only=favorites_only
+                )
+
+                successfully_processed.append(batch_item['photo_id'])
+
+            except Exception as e:
+                logger.error(f"Failed to process photo {batch_item['photo_id']}: {e}")
+                # Continue with next photo
 
         # Clear processed photos from log
         self._clear_processed_from_log(successfully_processed)
@@ -1619,8 +1609,8 @@ class ImmichPlugin(IcloudpdPlugin):
 
     def on_run_completed(self, dry_run: bool) -> None:
         """Run complete - process any remaining batch and show final summary"""
-        # Process any remaining photos in batch queue
-        if self.batch_process_enabled and self.batch_queue:
+        # Process any remaining photos in batch queue (if batch mode enabled)
+        if self.batch_size != 1 and self.batch_queue:
             logger.info(f"Processing remaining batch of {len(self.batch_queue)} photos")
             self._process_batch()
 

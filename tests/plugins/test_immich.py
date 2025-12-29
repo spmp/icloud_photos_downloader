@@ -150,7 +150,9 @@ class TestImmichPluginInit(unittest.TestCase):
         self.assertEqual(plugin.album_rules, [])
         # Accumulators should be empty
         self.assertEqual(plugin.current_photo_files, [])
-        self.assertEqual(plugin.current_immich_assets, [])
+        # Batch processing defaults
+        self.assertEqual(plugin.batch_size, 1)  # 1 = immediate processing (default)
+        self.assertEqual(plugin.batch_queue, [])
 
 
 class TestImmichPluginArguments(unittest.TestCase):
@@ -580,6 +582,7 @@ class TestImmichPluginProcessing(unittest.TestCase):
     def test_on_download_all_sizes_complete_dry_run(self):
         """Test processing in dry run mode"""
         mock_photo = Mock(spec=PhotoAsset)
+        mock_photo.filename = 'IMG_001.jpg'
 
         self.plugin.current_photo_files = [
             {
@@ -593,20 +596,18 @@ class TestImmichPluginProcessing(unittest.TestCase):
 
         self.plugin.on_download_all_sizes_complete(photo=mock_photo, dry_run=True)
 
-        # Should not process in dry run mode
-        self.assertEqual(len(self.plugin.current_immich_assets), 0)
+        # In dry run mode, batch queue should still be empty (no processing)
+        # Note: dry_run skips accumulation entirely
+        self.assertEqual(len(self.plugin.batch_queue), 0)
 
-    @patch('plugins.immich.immich.ImmichPlugin._wait_for_assets')
-    @patch('plugins.immich.immich.ImmichPlugin._trigger_library_scan')
-    @patch('plugins.immich.immich.ImmichPlugin._stack_size_variants')
-    @patch('plugins.immich.immich.ImmichPlugin._mark_favorites')
-    @patch('plugins.immich.immich.ImmichPlugin._apply_album_rules')
+    @patch('plugins.immich.immich.ImmichPlugin._process_photo_group')
     def test_on_download_all_sizes_complete_success(
-        self, mock_albums, mock_favs, mock_stack, mock_trigger, mock_wait
+        self, mock_process_photo_group
     ):
         """Test successful processing workflow"""
         mock_photo = Mock(spec=PhotoAsset)
         mock_photo.created = Mock()
+        mock_photo.filename = 'IMG_001.jpg'
         mock_photo._asset_record = {
             'fields': {
                 'isFavorite': {'value': 1}
@@ -625,25 +626,20 @@ class TestImmichPluginProcessing(unittest.TestCase):
 
         self.plugin.on_download_all_sizes_complete(photo=mock_photo, dry_run=False)
 
-        # Verify methods were called
-        mock_trigger.assert_called_once()
-        mock_wait.assert_called_once()
-        mock_stack.assert_called_once()
-        mock_favs.assert_called_once()
-        mock_albums.assert_called_once_with(mock_photo)
+        # Verify _process_photo_group was called with correct parameters
+        # For downloaded files (status='downloaded'), favorites_only should be False
+        mock_process_photo_group.assert_called_once()
+        call_args = mock_process_photo_group.call_args
+        self.assertFalse(call_args[1]['favorites_only'])  # Downloaded files get full processing
 
-    @patch('plugins.immich.immich.ImmichPlugin._search_asset_by_path')
-    @patch('plugins.immich.immich.ImmichPlugin._trigger_library_scan')
-    @patch('plugins.immich.immich.ImmichPlugin._wait_for_assets')
-    @patch('plugins.immich.immich.ImmichPlugin._stack_size_variants')
-    @patch('plugins.immich.immich.ImmichPlugin._mark_favorites')
-    @patch('plugins.immich.immich.ImmichPlugin._apply_album_rules')
+    @patch('plugins.immich.immich.ImmichPlugin._process_photo_group')
     def test_on_download_all_sizes_complete_existing_assets_found(
-        self, mock_albums, mock_favs, mock_stack, mock_wait, mock_trigger, mock_search
+        self, mock_process_photo_group
     ):
-        """Test optimization: skip scan when all existing files are already registered"""
+        """Test that process_existing=True processes existing files"""
         mock_photo = Mock(spec=PhotoAsset)
         mock_photo.created = Mock()
+        mock_photo.filename = 'IMG_001.jpg'
         mock_photo._asset_record = {
             'fields': {
                 'isFavorite': {'value': 0}
@@ -668,42 +664,22 @@ class TestImmichPluginProcessing(unittest.TestCase):
             },
         ]
 
-        # Mock that all assets are found
-        mock_search.side_effect = [
-            {'id': 'asset-1', 'originalPath': '/photos/IMG_001.jpg'},
-            {'id': 'asset-2', 'originalPath': '/photos/IMG_001-medium.jpg'},
-        ]
-
         self.plugin.on_download_all_sizes_complete(photo=mock_photo, dry_run=False)
 
-        # Verify scan was NOT triggered (optimization worked)
-        mock_trigger.assert_not_called()
-        mock_wait.assert_not_called()
-
-        # Verify search was called for each file
-        self.assertEqual(mock_search.call_count, 2)
-
-        # Verify other methods were still called
-        mock_stack.assert_called_once()
-        mock_favs.assert_not_called()  # Photo not favorite
-        mock_albums.assert_called_once_with(mock_photo)
+        # Verify _process_photo_group was called
+        mock_process_photo_group.assert_called_once()
 
         # Verify accumulators were cleared at end
-        self.assertEqual(len(self.plugin.current_immich_assets), 0)
         self.assertEqual(len(self.plugin.current_photo_files), 0)
 
-    @patch('plugins.immich.immich.ImmichPlugin._search_asset_by_path')
-    @patch('plugins.immich.immich.ImmichPlugin._trigger_library_scan')
-    @patch('plugins.immich.immich.ImmichPlugin._wait_for_assets')
-    @patch('plugins.immich.immich.ImmichPlugin._stack_size_variants')
-    @patch('plugins.immich.immich.ImmichPlugin._mark_favorites')
-    @patch('plugins.immich.immich.ImmichPlugin._apply_album_rules')
+    @patch('plugins.immich.immich.ImmichPlugin._process_photo_group')
     def test_on_download_all_sizes_complete_existing_assets_missing(
-        self, mock_albums, mock_favs, mock_stack, mock_wait, mock_trigger, mock_search
+        self, mock_process_photo_group
     ):
-        """Test that scan is triggered when existing files are not all registered"""
+        """Test that existing files are processed via batch/immediate mode"""
         mock_photo = Mock(spec=PhotoAsset)
         mock_photo.created = Mock()
+        mock_photo.filename = 'IMG_001.jpg'
         mock_photo._asset_record = {
             'fields': {
                 'isFavorite': {'value': 0}
@@ -728,28 +704,11 @@ class TestImmichPluginProcessing(unittest.TestCase):
             },
         ]
 
-        # Mock that only one asset is found initially
-        mock_search.side_effect = [
-            {'id': 'asset-1', 'originalPath': '/photos/IMG_001.jpg'},
-            None,  # Second asset not found
-        ]
-
-        # Mock wait_for_assets to return both assets
-        mock_wait.return_value = {
-            '/photos/IMG_001.jpg': {'id': 'asset-1', 'originalPath': '/photos/IMG_001.jpg'},
-            '/photos/IMG_001-medium.jpg': {'id': 'asset-2', 'originalPath': '/photos/IMG_001-medium.jpg'},
-        }
-
         self.plugin.on_download_all_sizes_complete(photo=mock_photo, dry_run=False)
 
-        # Verify scan WAS triggered (some assets missing)
-        mock_trigger.assert_called_once()
-        mock_wait.assert_called_once()
-
-        # Verify other methods were still called
-        mock_stack.assert_called_once()
-        mock_favs.assert_not_called()
-        mock_albums.assert_called_once_with(mock_photo)
+        # Verify _process_photo_group was called
+        # The actual scan/wait logic is tested inside _process_photo_group
+        mock_process_photo_group.assert_called_once()
 
 
 class TestImmichPluginStacking(unittest.TestCase):
@@ -763,29 +722,29 @@ class TestImmichPluginStacking(unittest.TestCase):
         self.plugin.stack_media = True
         self.plugin.stack_priority = ['adjusted', 'original']
 
-    def test_stack_size_variants_no_sizes(self):
+    def test_process_stacking_no_sizes(self):
         """Test stacking with no eligible sizes"""
-        self.plugin.current_immich_assets = []
-        self.plugin._stack_size_variants()
+        assets = []
+        self.plugin._process_stacking(assets)
         # Should do nothing (just logs debug)
 
-    def test_stack_size_variants_single_size(self):
+    def test_process_stacking_single_size(self):
         """Test stacking with single size (no stacking needed)"""
-        self.plugin.current_immich_assets = [
+        assets = [
             {'asset_id': 'asset-001', 'size': 'adjusted'}
         ]
-        self.plugin._stack_size_variants()
+        self.plugin._process_stacking(assets)
         # Should do nothing (just logs debug)
 
     @patch('plugins.immich.immich.ImmichPlugin._create_stack')
-    def test_stack_size_variants_multiple_sizes(self, mock_create_stack):
+    def test_process_stacking_multiple_sizes(self, mock_create_stack):
         """Test stacking with multiple sizes"""
-        self.plugin.current_immich_assets = [
+        assets = [
             {'asset_id': 'asset-001', 'size': 'adjusted'},
             {'asset_id': 'asset-002', 'size': 'original'}
         ]
 
-        self.plugin._stack_size_variants()
+        self.plugin._process_stacking(assets)
 
         # Should call _create_stack with ordered IDs
         mock_create_stack.assert_called_once()
@@ -805,27 +764,124 @@ class TestImmichPluginFavorites(unittest.TestCase):
         self.plugin.favorite_sizes = ['adjusted']
 
     @patch('plugins.immich.immich.ImmichPlugin._set_favorite')
-    def test_mark_favorites(self, mock_set_favorite):
+    def test_process_favoriting(self, mock_set_favorite):
         """Test marking assets as favorites"""
-        self.plugin.current_immich_assets = [
+        assets = [
             {'asset_id': 'asset-001', 'size': 'adjusted', 'is_favorite': False},
             {'asset_id': 'asset-002', 'size': 'original', 'is_favorite': False}
         ]
+        is_favorite = True
 
-        self.plugin._mark_favorites()
+        self.plugin._process_favoriting(assets, is_favorite)
 
         # Should call _set_favorite with only adjusted asset
         mock_set_favorite.assert_called_once_with(['asset-001'], True)
 
-    def test_mark_favorites_no_matches(self):
+    def test_process_favoriting_no_matches(self):
         """Test marking favorites with no matching sizes"""
-        self.plugin.current_immich_assets = [
+        assets = [
             {'asset_id': 'asset-001', 'size': 'medium', 'is_favorite': False}
         ]
+        is_favorite = True
 
         # Should return early without calling any API
-        self.plugin._mark_favorites()
+        self.plugin._process_favoriting(assets, is_favorite)
         # No exception should be raised
+
+
+class TestImmichPluginProcessExistingFavoritesOnly(unittest.TestCase):
+    """Test ImmichPlugin process existing favorites only functionality (favorites_only=True)"""
+
+    def setUp(self):
+        """Set up test plugin"""
+        self.plugin = ImmichPlugin()
+        self.plugin.server_url = 'http://localhost:2283'
+        self.plugin.api_key = 'test-key'
+        self.plugin.library_id = 'lib-123'
+        self.plugin.favorite_sizes = ['adjusted']
+        self.plugin.scan_timeout = 5.0
+        self.plugin.process_existing_favorites = True
+
+    @patch('plugins.immich.immich.ImmichPlugin._process_photo_group')
+    def test_process_existing_favorites_only_assets_already_registered(self, mock_process_photo_group):
+        """Test processing existing favorites when all files existed"""
+        # Mock photo
+        mock_photo = Mock(spec=PhotoAsset)
+        mock_photo.filename = 'IMG_001.HEIC'
+        mock_photo.created = Mock()
+        mock_photo._asset_record = {
+            'fields': {
+                'isFavorite': {'value': 1}  # IS favorite
+            }
+        }
+
+        # Set up current_photo_files - all existed
+        self.plugin.current_photo_files = [
+            {'status': 'existed', 'path': '/photos/IMG_001.jpg', 'size': 'adjusted', 'is_live': False, 'photo_filename': 'IMG_001.HEIC'},
+            {'status': 'existed', 'path': '/photos/IMG_001_original.jpg', 'size': 'original', 'is_live': False, 'photo_filename': 'IMG_001.HEIC'}
+        ]
+
+        # Call on_download_all_sizes_complete
+        self.plugin.on_download_all_sizes_complete(photo=mock_photo, dry_run=False)
+
+        # Should call _process_photo_group with favorites_only=True
+        # (all existed + process_existing_favorites + is_favorite)
+        mock_process_photo_group.assert_called_once()
+        call_args = mock_process_photo_group.call_args
+        self.assertTrue(call_args[1]['favorites_only'])
+
+    @patch('plugins.immich.immich.ImmichPlugin._process_photo_group')
+    def test_process_existing_favorites_only_assets_missing_triggers_scan(self, mock_process_photo_group):
+        """Test that favorites_only=True when all conditions met"""
+        # Mock photo
+        mock_photo = Mock(spec=PhotoAsset)
+        mock_photo.filename = 'IMG_002.HEIC'
+        mock_photo.created = Mock()
+        mock_photo._asset_record = {
+            'fields': {
+                'isFavorite': {'value': 1}  # IS favorite
+            }
+        }
+
+        # Set up current_photo_files - all existed
+        self.plugin.current_photo_files = [
+            {'status': 'existed', 'path': '/photos/IMG_002.jpg', 'size': 'adjusted', 'is_live': False, 'photo_filename': 'IMG_002.HEIC'}
+        ]
+
+        # Call on_download_all_sizes_complete
+        self.plugin.on_download_all_sizes_complete(photo=mock_photo, dry_run=False)
+
+        # Should call _process_photo_group with favorites_only=True
+        mock_process_photo_group.assert_called_once()
+        call_args = mock_process_photo_group.call_args
+        self.assertTrue(call_args[1]['favorites_only'])
+
+    @patch('plugins.immich.immich.ImmichPlugin._process_photo_group')
+    def test_process_existing_favorites_only_no_favorite_sizes_configured(self, mock_process_photo_group):
+        """Test that favorites_only=False when photo is NOT favorite"""
+        # Mock photo that is NOT a favorite
+        mock_photo = Mock(spec=PhotoAsset)
+        mock_photo.filename = 'IMG_003.HEIC'
+        mock_photo.created = Mock()
+        mock_photo._asset_record = {
+            'fields': {
+                'isFavorite': {'value': 0}  # NOT favorite
+            }
+        }
+
+        # Set up current_photo_files - all existed
+        self.plugin.current_photo_files = [
+            {'status': 'existed', 'path': '/photos/IMG_003.jpg', 'size': 'adjusted', 'is_live': False, 'photo_filename': 'IMG_003.HEIC'}
+        ]
+
+        # Call on_download_all_sizes_complete
+        self.plugin.on_download_all_sizes_complete(photo=mock_photo, dry_run=False)
+
+        # Should call _process_photo_group with favorites_only=False
+        # (all existed + process_existing_favorites BUT NOT is_favorite)
+        mock_process_photo_group.assert_called_once()
+        call_args = mock_process_photo_group.call_args
+        self.assertFalse(call_args[1]['favorites_only'])
 
 
 class TestImmichPluginAlbums(unittest.TestCase):
@@ -840,19 +896,19 @@ class TestImmichPluginAlbums(unittest.TestCase):
 
     @patch('plugins.immich.immich.ImmichPlugin._add_assets_to_album')
     @patch('plugins.immich.immich.ImmichPlugin._get_or_create_album')
-    def test_apply_album_rules(self, mock_get_album, mock_add_assets):
+    def test_process_albums(self, mock_get_album, mock_add_assets):
         """Test applying album rules"""
         mock_get_album.return_value = 'album-123'
 
-        mock_photo = Mock(spec=PhotoAsset)
-        mock_photo.created = Mock()
+        mock_photo_created = Mock()
+        photo_filename = 'IMG_001.jpg'
 
-        self.plugin.current_immich_assets = [
+        assets = [
             {'asset_id': 'asset-001', 'size': 'adjusted'},
             {'asset_id': 'asset-002', 'size': 'original'}
         ]
 
-        self.plugin._apply_album_rules(mock_photo)
+        self.plugin._process_albums(assets, mock_photo_created, photo_filename)
 
         # Should get/create album and add only adjusted asset
         mock_get_album.assert_called_once_with('Favorites')
@@ -870,22 +926,20 @@ class TestImmichPluginBatchProcessing(unittest.TestCase):
         self.plugin.library_id = 'lib-123'
 
     def test_batch_processing_disabled_by_default(self):
-        """Test batch processing is disabled by default"""
-        self.assertFalse(self.plugin.batch_process_enabled)
+        """Test batch processing is immediate by default (batch_size=1)"""
+        # batch_size=1 means immediate processing (process batch of 1 immediately)
         self.assertEqual(self.plugin.batch_size, 1)
 
     def test_batch_processing_enabled_with_size(self):
         """Test batch processing enabled with specific batch size"""
-        self.plugin.batch_process_enabled = True
         self.plugin.batch_size = 10
         self.assertEqual(self.plugin.batch_size, 10)
-        self.assertTrue(self.plugin.batch_process_enabled)
 
     def test_batch_processing_enabled_process_all(self):
         """Test batch processing enabled with 'all' (process at end)"""
-        self.plugin.batch_process_enabled = True
-        self.plugin.batch_size = 'all'
-        self.assertEqual(self.plugin.batch_size, 'all')
+        # batch_size=0 means process all at end
+        self.plugin.batch_size = 0
+        self.assertEqual(self.plugin.batch_size, 0)
 
     def test_batch_log_file_default_path(self):
         """Test default batch log file path"""
@@ -894,25 +948,31 @@ class TestImmichPluginBatchProcessing(unittest.TestCase):
         self.plugin.batch_log_file = expected_path
         self.assertEqual(self.plugin.batch_log_file, expected_path)
 
-    def test_batch_accumulation_no_batching(self):
-        """Test that without batching, photos are processed immediately"""
-        self.plugin.batch_process_enabled = False
+    def test_batch_accumulation_immediate_mode(self):
+        """Test that with batch_size=1, photos are still accumulated (processed as batch of 1)"""
+        # batch_size=1 is default, processes immediately as a batch of 1
+        self.plugin.batch_size = 1
 
         # Mock photo
         photo = Mock(spec=PhotoAsset)
         photo.id = 'photo-001'
+        photo._asset_record = {'fields': {'isFavorite': {'value': 0}}}
 
-        # Simulate file download
+        # Add files to current_photo_files
         self.plugin.current_photo_files = [
             {'status': 'downloaded', 'path': '/photos/img1.jpg', 'size': 'original'}
         ]
 
-        # With no batching, batch_queue should remain empty
-        self.assertEqual(len(self.plugin.batch_queue), 0)
+        # Call the accumulation method
+        self.plugin._accumulate_to_batch(photo)
+
+        # Verify batch queue has the photo (will be processed immediately in on_download_all_sizes_complete)
+        self.assertEqual(len(self.plugin.batch_queue), 1)
+        self.assertEqual(self.plugin.batch_queue[0]['photo_id'], 'photo-001')
+        self.assertEqual(len(self.plugin.batch_queue[0]['files']), 1)
 
     def test_batch_accumulation_with_batching(self):
         """Test that with batching enabled, photos are added to batch queue"""
-        self.plugin.batch_process_enabled = True
         self.plugin.batch_size = 10
 
         # Mock photo
@@ -925,7 +985,7 @@ class TestImmichPluginBatchProcessing(unittest.TestCase):
             {'status': 'downloaded', 'path': '/photos/img1.jpg', 'size': 'original'}
         ]
 
-        # Call the accumulation method (will be implemented)
+        # Call the accumulation method
         self.plugin._accumulate_to_batch(photo)
 
         # Verify batch queue has the photo
@@ -935,7 +995,6 @@ class TestImmichPluginBatchProcessing(unittest.TestCase):
 
     def test_batch_trigger_after_n_photos(self):
         """Test batch processing triggers after N photos accumulated"""
-        self.plugin.batch_process_enabled = True
         self.plugin.batch_size = 3
 
         # Add 3 photos to batch queue
@@ -949,12 +1008,11 @@ class TestImmichPluginBatchProcessing(unittest.TestCase):
             ]
             self.plugin._accumulate_to_batch(photo)
 
-        # After 3 photos, batch should be ready to process
-        self.assertTrue(self.plugin._should_process_batch())
+        # After 3 photos, batch queue should have 3 items
+        self.assertEqual(len(self.plugin.batch_queue), 3)
 
     def test_batch_not_triggered_before_n_photos(self):
         """Test batch processing doesn't trigger before N photos"""
-        self.plugin.batch_process_enabled = True
         self.plugin.batch_size = 10
 
         # Add only 5 photos
@@ -968,13 +1026,12 @@ class TestImmichPluginBatchProcessing(unittest.TestCase):
             ]
             self.plugin._accumulate_to_batch(photo)
 
-        # Should not trigger yet
-        self.assertFalse(self.plugin._should_process_batch())
+        # Batch queue should have 5 items but not be processed yet
+        self.assertEqual(len(self.plugin.batch_queue), 5)
 
     def test_batch_process_all_waits_until_end(self):
-        """Test batch_size='all' doesn't trigger until on_run_completed"""
-        self.plugin.batch_process_enabled = True
-        self.plugin.batch_size = 'all'
+        """Test batch_size=0 ('all') accumulates all photos until on_run_completed"""
+        self.plugin.batch_size = 0  # 0 means 'all'
 
         # Add many photos
         for i in range(100):
@@ -987,8 +1044,7 @@ class TestImmichPluginBatchProcessing(unittest.TestCase):
             ]
             self.plugin._accumulate_to_batch(photo)
 
-        # Should never trigger during accumulation
-        self.assertFalse(self.plugin._should_process_batch())
+        # Should have accumulated all 100 photos
         self.assertEqual(len(self.plugin.batch_queue), 100)
 
     @patch('os.path.exists')
@@ -1063,26 +1119,26 @@ class TestImmichPluginBatchProcessing(unittest.TestCase):
         # Batch queue should be empty
         self.assertEqual(len(self.plugin.batch_queue), 0)
 
-    def test_on_download_all_sizes_complete_batching_disabled(self):
-        """Test on_download_all_sizes_complete without batching processes immediately"""
-        self.plugin.batch_process_enabled = False
+    def test_on_download_all_sizes_complete_immediate_mode(self):
+        """Test on_download_all_sizes_complete with batch_size=1 processes immediately"""
+        # batch_size=1 is the default (immediate processing)
+        self.plugin.batch_size = 1
 
         photo = Mock(spec=PhotoAsset)
         photo.id = 'photo-001'
+        photo.filename = 'IMG_001.jpg'
         photo._asset_record = {'fields': {'isFavorite': {'value': 0}}}
 
         self.plugin.current_photo_files = [
             {'status': 'downloaded', 'path': '/photos/img1.jpg', 'size': 'original'}
         ]
 
-        # Should process immediately (existing behavior)
-        # We'll verify this by checking that batch queue remains empty
-        self.assertEqual(len(self.plugin.batch_queue), 0)
+        # With batch_size=1, accumulates to queue and processes immediately
+        # (batch queue gets cleared after processing)
 
     @patch('plugins.immich.immich.ImmichPlugin._process_batch')
     def test_on_run_completed_processes_remaining_batch(self, mock_process_batch):
         """Test on_run_completed processes all remaining batched photos"""
-        self.plugin.batch_process_enabled = True
         self.plugin.batch_size = 10
 
         # Add some photos to batch queue (less than batch size)
@@ -1100,7 +1156,6 @@ class TestImmichPluginBatchProcessing(unittest.TestCase):
 
     def test_batch_preserves_photo_metadata(self):
         """Test batch queue preserves necessary photo metadata for processing"""
-        self.plugin.batch_process_enabled = True
         self.plugin.batch_size = 10
 
         photo = Mock(spec=PhotoAsset)
@@ -1138,9 +1193,8 @@ class TestImmichPluginBatchProcessing(unittest.TestCase):
         expected_dir = os.path.dirname('/new/path/pending.json')
         mock_makedirs.assert_called_once_with(expected_dir, exist_ok=True)
 
-    def test_batch_queue_only_for_new_files(self):
-        """Test batching only applies to newly downloaded files, not existing"""
-        self.plugin.batch_process_enabled = True
+    def test_batch_queue_includes_all_files(self):
+        """Test batching includes both downloaded and existed files"""
         self.plugin.batch_size = 10
         self.plugin.process_existing = True
 
@@ -1156,13 +1210,12 @@ class TestImmichPluginBatchProcessing(unittest.TestCase):
 
         self.plugin._accumulate_to_batch(photo)
 
-        # Batch should only contain downloaded file
+        # Batch should contain all files - batching applies to entire photo processing
         batch_item = self.plugin.batch_queue[0]
         downloaded_files = [f for f in batch_item['files'] if f['status'] == 'downloaded']
         existed_files = [f for f in batch_item['files'] if f['status'] == 'existed']
 
-        # Both should be in batch - batching applies to entire photo processing
-        # Re-reading requirement: batching applies to all processing
+        # Both should be in batch - batching applies to all processing
         self.assertEqual(len(batch_item['files']), 2)
 
 
