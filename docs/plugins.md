@@ -15,14 +15,174 @@ The plugin system uses a **hook-based architecture** where plugins can register 
 
 ### Immich Plugin
 
-The [Immich plugin](../plugins/immich/README.md) integrates with [Immich](https://immich.app) photo management. It automatically:
-- Registers downloaded photos in Immich's external library
-- Creates stacks for size variants (original, adjusted, medium)
-- Syncs favorites from iCloud to Immich
-- Organizes photos into albums
-- Associates live photo videos with images
+The Immich plugin integrates with [Immich](https://immich.app), an open-source photo management solution. It automatically registers downloaded photos, creates stacks for size variants, syncs favorites, and organizes photos into albums.
 
-See the [Immich plugin README](../plugins/immich/README.md) for complete documentation.
+#### Features
+
+- **Automatic Registration**: Photos are automatically registered in Immich after download via external library scanning
+- **Size Variant Stacking**: Stack different size variants (original, adjusted, medium, etc.) together
+- **Favorites Sync**: Synchronize iCloud favorites to Immich
+- **Album Organization**: Organize photos into albums with flexible date-based rules
+- **Live Photo Support**: Associate live photo videos with size variants
+- **Batch Processing**: Process photos in batches to reduce server load
+- **Favorites-Only Mode**: Lightweight mode to update favorites on existing downloaded images
+- **Directory Validation**: Ensures icloudpd directories are within Immich library import paths
+
+#### Requirements
+
+- Immich server (tested with v1.100+)
+- Immich API key (generate in Immich: Account Settings → API Keys)
+- Immich external library with configured import paths
+- icloudpd download directory must be within the Immich library's import paths
+
+> **Note**: This plugin does NOT upload files - it uses Immich's external library feature to discover files already on disk.
+
+#### Quick Start
+
+```bash
+icloudpd \
+  --directory /path/to/photos \
+  --username me@you.com \
+  --plugin immich \
+  --immich-server-url http://localhost:2283 \
+  --immich-api-key YOUR_API_KEY \
+  --immich-library-id YOUR_LIBRARY_ID \
+  --immich-stack-media \
+  --immich-favorite adjusted
+```
+
+**Finding your Library ID:**
+
+```bash
+curl -H "x-api-key: YOUR_API_KEY" http://localhost:2283/api/libraries
+```
+
+Look for the `id` field of your external library in the JSON response.
+
+#### Configuration Options
+
+**Required Parameters:**
+
+- `--plugin immich` - Enable the Immich plugin
+- `--immich-server-url URL` - Immich server URL (e.g., `http://localhost:2283`)
+- `--immich-api-key KEY` - Immich API key
+- `--immich-library-id ID` - Immich external library ID
+
+**Stacking Size Variants:**
+
+Stack multiple size variants together in Immich:
+
+```bash
+--immich-stack-media                    # Stack all downloaded sizes
+--immich-stack-media adjusted,original  # Stack only these sizes (adjusted on top)
+```
+
+The first specified size becomes the primary asset on top of the stack.
+
+**Favoriting:**
+
+Sync iCloud favorites to Immich:
+
+```bash
+--immich-favorite adjusted              # Mark adjusted size as favorite
+--immich-favorite adjusted,medium       # Mark multiple sizes as favorite
+--immich-favorite                       # Mark all sizes as favorite
+```
+
+**Albums:**
+
+Organize photos into Immich albums with flexible rules:
+
+```bash
+--immich-album "iCloud Photos"                      # Add all sizes to one album
+--immich-album "[adjusted]:iCloud"                  # Only adjusted size
+--immich-album "[adjusted]:iCloud/{:%Y/%m}"         # Date-based albums
+--immich-album "[medium]:iCloud JPG"                # Multiple rules
+--immich-album "[original]:iCloud Raw"
+```
+
+Album template syntax:
+- `[size1,size2]:template` - Only these sizes go to this album
+- `template` - All sizes go to this album
+- `{:%Y/%m}` - Date substitution using photo's creation date (supports strftime format codes)
+
+Examples:
+- `iCloud/{:%Y/%m}` → "iCloud/2024/01", "iCloud/2024/02", etc.
+- `Photos/{:%Y}` → "Photos/2024", "Photos/2025", etc.
+
+**Live Photo Association:**
+
+Associate live photo videos with size variants:
+
+```bash
+--associate-live-with-extra-sizes                   # Associate with all sizes
+--associate-live-with-extra-sizes adjusted,medium   # Associate with specific sizes
+```
+
+This ensures that when you have multiple size variants, the live photo video component is associated with all of them in Immich.
+
+**Processing Modes:**
+
+Process existing files (not just newly downloaded):
+
+```bash
+--immich-process-existing               # Full processing: stack, favorite, albums
+--immich-process-existing-favorites     # Only update favorites on existing files
+```
+
+`--immich-process-existing` is useful for initial setup or full re-processing. `--immich-process-existing-favorites` is useful when running with `--watch-with-interval` and `--until-found` to sync favorites that were added after photos were taken.
+
+**Batch Processing:**
+
+Reduce server load by processing photos in batches:
+
+```bash
+--immich-batch-process 10               # Process every 10 photos
+--immich-batch-process all              # Process all at end of run
+--immich-batch-log-file /path/file.json # Custom log file (default: ~/.pyicloud/immich_pending_files.json)
+```
+
+Batching reduces library scan frequency, preventing OOM errors on large imports. The log file enables crash recovery by tracking unprocessed photos.
+
+**Performance Tuning:**
+
+```bash
+--immich-scan-timeout 60.0              # Wait up to 60s for library scan (default: 5s)
+--immich-poll-interval 1.0              # Check every 1s during scan wait (default: 1s)
+```
+
+Increase `--immich-scan-timeout` if your Immich server is slow or heavily loaded.
+
+#### Example Configuration
+
+Daily sync with favorite updates:
+
+```bash
+icloudpd \
+  --directory /mnt/photos \
+  --username user@icloud.com \
+  --size original --size medium --size adjusted \
+  --watch-with-interval 86400 \
+  --until-found 1000 \
+  --plugin immich \
+  --immich-server-url https://immich.example.com \
+  --immich-api-key YOUR_API_KEY \
+  --immich-library-id abc123 \
+  --immich-stack-media \
+  --associate-live-with-extra-sizes \
+  --immich-favorite adjusted \
+  --immich-process-existing-favorites \
+  --immich-batch-process 10 \
+  --immich-album "[adjusted]:iCloud"
+```
+
+This configuration:
+- Downloads 3 sizes and stacks them
+- Runs daily, processing up to 1000 existing photos
+- Updates favorites for existing photos
+- Batches every 10 photos to reduce server load
+- Marks adjusted size as favorite in Immich
+- Adds adjusted size to "iCloud" album
 
 ### Demo Plugin
 
@@ -31,8 +191,6 @@ The demo plugin demonstrates the plugin system's capabilities. Use it as a refer
 ```bash
 icloudpd --plugin demo --demo-verbose --recent 5
 ```
-
-See [`src/icloudpd/plugins/demo.py`](../src/icloudpd/plugins/demo.py) for the implementation.
 
 ## Using Plugins
 
@@ -516,8 +674,8 @@ icloudpd --plugin myplugin --myplugin-option test --recent 1 --dry-run
 
 See these plugins for real-world examples:
 
-- **Immich Plugin** ([plugins/immich/immich.py](../plugins/immich/immich.py)) - Complete production plugin with stacking, favorites, albums, batch processing
-- **Demo Plugin** ([src/icloudpd/plugins/demo.py](../src/icloudpd/plugins/demo.py)) - Educational example showing all hooks and patterns
+- **Immich Plugin** - Complete production plugin with stacking, favorites, albums, batch processing
+- **Demo Plugin** - Educational example showing all hooks and patterns
 
 ## Plugin Lifecycle
 
@@ -600,7 +758,6 @@ Check that:
 
 ## Additional Resources
 
-- [Base Plugin Class](../src/icloudpd/plugins/base.py) - Reference implementation
-- [Plugin Manager](../src/icloudpd/plugins/manager.py) - How plugins are loaded and called
-- [Immich Plugin README](../plugins/immich/README.md) - Complete plugin documentation
-- [PhotoAsset API](https://github.com/icloud-photos-downloader/icloud_photos_downloader) - Photo metadata reference
+- **icloudpd GitHub Repository** - Source code and documentation: https://github.com/icloud-photos-downloader/icloud_photos_downloader
+- **Immich Documentation** - Official Immich docs: https://immich.app/docs/
+- **Plugin Examples** - See the `src/icloudpd/plugins/` and `plugins/` directories in the icloudpd repository

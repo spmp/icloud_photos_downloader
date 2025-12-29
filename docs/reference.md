@@ -379,3 +379,21 @@ This is a list of all options available for the command line interface (CLI) of 
     ```{note}
     The date is when the asset was created, not when it was added to iCloud.
     ```
+(plugin-parameter)=
+`--plugin X`
+
+:   Enable a plugin (can be used multiple times).
+
+    ```{seealso}
+    Details on [Plugins](plugins)
+    ```
+
+(list-plugins-parameter)=
+`--list-plugins`
+
+:   List available plugins and exit.
+
+(plugin-help-parameter)=
+`--plugin-help X`
+
+:   Show help for a specific plugin.
