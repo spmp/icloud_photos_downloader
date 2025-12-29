@@ -5,8 +5,10 @@ This plugin demonstrates:
 2. Reporting accumulated data in on_download_all_sizes_complete
 3. Clearing accumulator after each photo
 4. Showing what context is available at each hook point
+5. Proper logger initialization and usage
 """
 
+import logging
 from argparse import ArgumentParser, Namespace
 from typing import TYPE_CHECKING, Any, Dict, List
 
@@ -18,6 +20,11 @@ if TYPE_CHECKING:
     from typing import Sequence
 
     from icloudpd.config import GlobalConfig, UserConfig
+
+# Initialize logger for this module
+# This is the standard way to initialize a logger in Python plugins
+# Use explicit namespace to ensure correct logger hierarchy
+logger = logging.getLogger("icloudpd.plugins.demo")
 
 
 class DemoPlugin(IcloudpdPlugin):
@@ -120,8 +127,8 @@ class DemoPlugin(IcloudpdPlugin):
     ) -> None:
         """File already exists - add to accumulator"""
         if not self.compact and not self.verbose:
-            print(f"   📂 Exists:     {download_size.value:>11} - {download_path}")
-        
+            logger.info(f"   📂 Exists:     {download_size.value:>11} - {download_path}")
+
         # Accumulate
         self.current_photo_files.append({
             'status': 'existed',
@@ -141,8 +148,8 @@ class DemoPlugin(IcloudpdPlugin):
     ) -> None:
         """File was downloaded - add to accumulator"""
         if not self.compact and not self.verbose:
-            print(f"   ⬇️  Downloaded: {download_size.value:>11} - {download_path}")
-        
+            logger.info(f"   ⬇️  Downloaded: {download_size.value:>11} - {download_path}")
+
         # Accumulate
         self.current_photo_files.append({
             'status': 'downloaded',
@@ -161,7 +168,7 @@ class DemoPlugin(IcloudpdPlugin):
         dry_run: bool,
     ) -> None:
         """Size processing complete - accumulate if not already accumulated.
-        
+
         This hook ALWAYS runs, so we use it to ensure files are tracked
         even if they didn't go through exists or downloaded hooks.
         """
@@ -169,18 +176,19 @@ class DemoPlugin(IcloudpdPlugin):
         already_accumulated = any(
             f['path'] == download_path for f in self.current_photo_files
         )
-        
+
         # If not accumulated yet (edge case), add it now
         if not already_accumulated:
+            logger.debug(f"File {download_path} not previously accumulated, adding now")
             self.current_photo_files.append({
                 'status': 'complete',
                 'path': download_path,
                 'size': download_size.value,
                 'is_live': False,
             })
-        
+
         if self.verbose:
-            print(f"   ✅ Complete:   {download_size.value:>11} - {download_path}")
+            logger.info(f"   ✅ Complete:   {download_size.value:>11} - {download_path}")
     
     # ========================================================================
     # LIVE PHOTO HOOKS - Accumulate live photo data
@@ -196,8 +204,8 @@ class DemoPlugin(IcloudpdPlugin):
     ) -> None:
         """Live photo exists - add to accumulator"""
         if not self.compact and not self.verbose:
-            print(f"   📂 Exists:     {download_size.value:>11} - {download_path} 🎥")
-        
+            logger.info(f"   📂 Exists:     {download_size.value:>11} - {download_path} 🎥")
+
         # Accumulate
         self.current_photo_files.append({
             'status': 'existed',
@@ -218,8 +226,8 @@ class DemoPlugin(IcloudpdPlugin):
     ) -> None:
         """Live photo downloaded - add to accumulator"""
         if not self.compact and not self.verbose:
-            print(f"   ⬇️  Downloaded: {download_size.value:>11} - {download_path} 🎥")
-        
+            logger.info(f"   ⬇️  Downloaded: {download_size.value:>11} - {download_path} 🎥")
+
         # Accumulate
         self.current_photo_files.append({
             'status': 'downloaded',
@@ -243,8 +251,9 @@ class DemoPlugin(IcloudpdPlugin):
         already_accumulated = any(
             f['path'] == download_path for f in self.current_photo_files
         )
-        
+
         if not already_accumulated:
+            logger.debug(f"Live photo {download_path} not previously accumulated, adding now")
             self.current_photo_files.append({
                 'status': 'complete',
                 'path': download_path,
@@ -252,9 +261,9 @@ class DemoPlugin(IcloudpdPlugin):
                 'is_live': True,
             })
             self.total_files_live += 1
-        
+
         if self.verbose:
-            print(f"   ✅ Complete:   {download_size.value:>11} - {download_path} 🎥")
+            logger.info(f"   ✅ Complete:   {download_size.value:>11} - {download_path} 🎥")
     
     # ========================================================================
     # KEY HOOK - Process accumulated data and clear
@@ -266,7 +275,7 @@ class DemoPlugin(IcloudpdPlugin):
         dry_run: bool,
     ) -> None:
         """ALL sizes complete - process accumulated data and clear.
-        
+
         This is where you would:
         - Upload all accumulated files to a service
         - Stack size variants together
@@ -274,56 +283,58 @@ class DemoPlugin(IcloudpdPlugin):
         - Generate reports
         """
         self.total_photos += 1
-        
+
+        logger.debug(f"Processing complete for photo {photo.filename} ({len(self.current_photo_files)} files)")
+
         if self.compact:
             # Compact mode: one line per photo
             downloaded = sum(1 for f in self.current_photo_files if f['status'] == 'downloaded')
             existed = sum(1 for f in self.current_photo_files if f['status'] == 'existed')
             sizes = ','.join(set(f['size'] for f in self.current_photo_files))
-            
+
             # Check if favorite
             is_fav = photo._asset_record.get("fields", {}).get("isFavorite", {}).get("value") == 1
             fav_marker = "⭐" if is_fav else "  "
-            
-            print(f"{fav_marker} {photo.filename} [{sizes}] (↓{downloaded} ✓{existed})")
+
+            logger.info(f"{fav_marker} {photo.filename} [{sizes}] (↓{downloaded} ✓{existed})")
         else:
             # Full mode: detailed output
-            print("\n" + "=" * 70)
-            print(f"📸 PHOTO COMPLETE: {photo.filename} (#{self.total_photos})")
-            print("=" * 70)
-            
+            logger.info("\n" + "=" * 70)
+            logger.info(f"📸 PHOTO COMPLETE: {photo.filename} (#{self.total_photos})")
+            logger.info("=" * 70)
+
             # Photo info
             is_fav = photo._asset_record.get("fields", {}).get("isFavorite", {}).get("value") == 1
-            print("\n📋 Photo Information:")
-            print(f"   ID:         {photo.id}")
-            print(f"   Filename:   {photo.filename}")
-            print(f"   Favorite:   {'⭐ YES' if is_fav else 'No'}")
-            
+            logger.info("\n📋 Photo Information:")
+            logger.info(f"   ID:         {photo.id}")
+            logger.info(f"   Filename:   {photo.filename}")
+            logger.info(f"   Favorite:   {'⭐ YES' if is_fav else 'No'}")
+
             if self.verbose:
-                print(f"   Created:    {photo.created}")
-                print(f"   Size:       {photo.size:,} bytes")
+                logger.info(f"   Created:    {photo.created}")
+                logger.info(f"   Size:       {photo.size:,} bytes")
                 if hasattr(photo, 'dimensions'):
-                    print(f"   Dimensions: {photo.dimensions}")
-            
+                    logger.info(f"   Dimensions: {photo.dimensions}")
+
             # Accumulated files
-            print(f"\n📁 Processed Files ({len(self.current_photo_files)}):")
+            logger.info(f"\n📁 Processed Files ({len(self.current_photo_files)}):")
             for i, file_info in enumerate(self.current_photo_files, 1):
                 status_icon = "⬇️" if file_info['status'] == 'downloaded' else "📂"
                 live_icon = " 🎥" if file_info['is_live'] else ""
-                print(f"   {status_icon} {i}. [{file_info['size']:>11}]{live_icon}")
+                logger.info(f"   {status_icon} {i}. [{file_info['size']:>11}]{live_icon}")
                 if self.verbose:
-                    print(f"       {file_info['path']}")
-            
+                    logger.info(f"       {file_info['path']}")
+
             # What a real plugin would do
-            print("\n💡 What a Real Plugin Would Do Here:")
-            print(f"   • Upload {len(self.current_photo_files)} file(s) to cloud storage")
+            logger.info("\n💡 What a Real Plugin Would Do Here:")
+            logger.info(f"   • Upload {len(self.current_photo_files)} file(s) to cloud storage")
             if len(self.current_photo_files) > 1:
-                print(f"   • Stack/group the {len(self.current_photo_files)} variants together")
+                logger.info(f"   • Stack/group the {len(self.current_photo_files)} variants together")
             if is_fav:
-                print("   • Mark as favorite in the service")
-            print("   • Add to album based on date or tags")
-            print()
-        
+                logger.info("   • Mark as favorite in the service")
+            logger.info("   • Add to album based on date or tags")
+            logger.info("")
+
         # IMPORTANT: Clear accumulator for next photo
         self.current_photo_files.clear()
     
@@ -336,28 +347,31 @@ class DemoPlugin(IcloudpdPlugin):
         dry_run: bool,
     ) -> None:
         """Run complete - show final summary"""
+        logger.debug(f"Run completed - processed {self.total_photos} photos")
+
         if self.compact:
-            print(f"\n✅ Complete: {self.total_photos} photos, {self.total_files_downloaded + self.total_files_existed} files")
+            logger.info(f"\n✅ Complete: {self.total_photos} photos, {self.total_files_downloaded + self.total_files_existed} files")
         else:
-            print("\n" + "=" * 70)
-            print("✅ RUN COMPLETED")
-            print("=" * 70)
-            print("\n📊 Final Statistics:")
-            print(f"   Total Photos:         {self.total_photos}")
-            print(f"   Files Downloaded:     {self.total_files_downloaded}")
-            print(f"   Files Already Existed: {self.total_files_existed}")
-            print(f"   Live Photos:          {self.total_files_live}")
-            print(f"   Total Files:          {self.total_files_downloaded + self.total_files_existed}")
-            
-            print("\n💡 What a Real Plugin Would Do:")
-            print("   • Upload summary to service dashboard")
-            print("   • Send completion notification")
-            print("   • Trigger backup or sync processes")
-            print("   • Clean up temporary files")
-            print("=" * 70)
-            print()
-    
+            logger.info("\n" + "=" * 70)
+            logger.info("✅ RUN COMPLETED")
+            logger.info("=" * 70)
+            logger.info("\n📊 Final Statistics:")
+            logger.info(f"   Total Photos:         {self.total_photos}")
+            logger.info(f"   Files Downloaded:     {self.total_files_downloaded}")
+            logger.info(f"   Files Already Existed: {self.total_files_existed}")
+            logger.info(f"   Live Photos:          {self.total_files_live}")
+            logger.info(f"   Total Files:          {self.total_files_downloaded + self.total_files_existed}")
+
+            logger.info("\n💡 What a Real Plugin Would Do:")
+            logger.info("   • Upload summary to service dashboard")
+            logger.info("   • Send completion notification")
+            logger.info("   • Trigger backup or sync processes")
+            logger.info("   • Clean up temporary files")
+            logger.info("=" * 70)
+            logger.info("")
+
     def cleanup(self) -> None:
         """Cleanup called on shutdown"""
+        logger.debug("Demo Plugin: Cleanup called")
         if not self.compact and self.verbose:
-            print("\n🔌 Demo Plugin: Cleanup called")
+            logger.info("\n🔌 Demo Plugin: Cleanup called")
