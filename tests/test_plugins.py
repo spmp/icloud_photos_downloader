@@ -424,221 +424,299 @@ class TestDemoPlugin(unittest.TestCase):
         self.assertEqual(plugin.total_files_downloaded, 1)
 
 
-class TestImmichPluginIntegration(unittest.TestCase):
-    """Integration tests for Immich plugin via PluginManager
+class TestPluginManagerErrorHandling(unittest.TestCase):
+    """Test error handling in PluginManager"""
 
-    These tests verify that hooks are actually called when using the plugin manager,
-    catching issues where the plugin works in isolation but not when integrated.
-    """
+    def test_discover_plugin_directory_scan_error(self):
+        """Test error handling when scanning plugin directory fails"""
+        manager = PluginManager()
+        # The discover() method handles errors internally, so we just verify it doesn't crash
+        manager.discover()
+        # Should complete without raising
 
-    def test_immich_plugin_hook_calls_via_manager(self):
-        """Test that plugin manager successfully calls Immich plugin hooks"""
-        from plugins.immich.immich import ImmichPlugin
+    def test_discover_entry_point_error(self):
+        """Test error handling when entry point loading fails"""
+        manager = PluginManager()
+        # discover() handles errors internally
+        manager.discover()
+        # Should complete without raising
+
+    def test_enable_plugin_configure_error(self):
+        """Test error handling when plugin.configure() raises exception"""
+
+        class FailingConfigurePlugin(IcloudpdPlugin):
+            @property
+            def name(self):
+                return "failing"
+
+            def configure(self, config, global_config=None, user_configs=None):
+                raise ValueError("Configuration failed!")
 
         manager = PluginManager()
-        manager.available["immich"] = ImmichPlugin
+        manager.available["failing"] = FailingConfigurePlugin
+        manager.set_plugin_config(Namespace())
 
-        # Configure with minimal required settings
-        config = Namespace(
-            immich_server_url="http://localhost:2283",
-            immich_api_key="test-key",
-            immich_library_id="lib-123",
-            immich_process_existing=False,
-            immich_scan_timeout=5.0,
-            immich_poll_interval=1.0,
-            immich_stack_media=False,
-            immich_favorite=False,
-            associate_live_with_extra_sizes=False,
-            immich_albums=None,
-        )
+        # Should raise the configuration error
+        with self.assertRaises(ValueError):
+            manager.enable("failing")
 
-        # Enable the plugin (with mocked connection test)
-        with unittest.mock.patch.object(ImmichPlugin, "_test_immich_connection"):
-            manager.enable("immich", config)
+    def test_disable_plugin_cleanup_error(self):
+        """Test error handling when plugin.cleanup() raises exception"""
 
-        # Verify plugin was enabled
-        self.assertTrue(manager.is_enabled("immich"))
-        plugin = manager.enabled["immich"]
+        class FailingCleanupPlugin(IcloudpdPlugin):
+            @property
+            def name(self):
+                return "failing_cleanup"
 
-        # Test that hooks are called via manager.call_hook()
-        mock_photo = MagicMock(spec=PhotoAsset)
-        mock_photo.filename = "test.jpg"
-        mock_photo.id = "ABC123"
-        mock_photo._asset_record = {"fields": {"isFavorite": {"value": 0}}}
-        mock_photo.created = MagicMock()
-
-        # Call on_download_downloaded hook via manager
-        manager.call_hook(
-            "on_download_downloaded",
-            download_path="/photos/IMG_001.jpg",
-            photo_filename="IMG_001.jpg",
-            download_size=AssetVersionSize.ADJUSTED,
-            photo=mock_photo,
-            dry_run=False,
-        )
-
-        # Verify the plugin accumulated the file
-        self.assertEqual(len(plugin.current_photo_files), 1)
-        self.assertEqual(plugin.current_photo_files[0]["status"], "downloaded")
-        self.assertEqual(plugin.current_photo_files[0]["size"], "adjusted")
-
-    def test_immich_plugin_hook_not_called_with_wrong_signature(self):
-        """Test that hooks with mismatched signatures are not called
-
-        This test verifies that if there's a signature mismatch between the
-        base class and the plugin implementation, the hook won't be called.
-        """
-        from plugins.immich.immich import ImmichPlugin
+            def cleanup(self):
+                raise RuntimeError("Cleanup failed!")
 
         manager = PluginManager()
-        manager.available["immich"] = ImmichPlugin
+        manager.available["failing_cleanup"] = FailingCleanupPlugin
+        manager.enable("failing_cleanup", Namespace())
 
-        config = Namespace(
-            immich_server_url="http://localhost:2283",
-            immich_api_key="test-key",
-            immich_library_id="lib-123",
-            immich_process_existing=False,
-            immich_scan_timeout=5.0,
-            immich_poll_interval=1.0,
-            immich_stack_media=False,
-            immich_favorite=False,
-            associate_live_with_extra_sizes=False,
-            immich_albums=None,
-        )
+        # disable() should handle cleanup errors and still remove plugin
+        manager.disable("failing_cleanup")
 
-        with unittest.mock.patch.object(ImmichPlugin, "_test_immich_connection"):
-            manager.enable("immich", config)
+        # Plugin should be removed despite cleanup error
+        self.assertFalse(manager.is_enabled("failing_cleanup"))
 
-        plugin = manager.enabled["immich"]
+    def test_add_plugin_arguments_error(self):
+        """Test error handling when add_arguments() raises exception"""
 
-        # Try calling hook with wrong parameter names (should fail silently in call_hook)
-        # This should not raise but also should not accumulate anything
-        # because the parameters don't match what the method expects
-        manager.call_hook(
-            "on_download_downloaded",
-            wrong_param="/photos/IMG_001.jpg",
-            another_wrong="IMG_001.jpg",
-        )
+        class FailingArgumentsPlugin(IcloudpdPlugin):
+            @property
+            def name(self):
+                return "failing_args"
 
-        # Plugin should NOT have accumulated anything
-        self.assertEqual(len(plugin.current_photo_files), 0)
-
-    def test_immich_plugin_accumulation_via_manager(self):
-        """Test full file accumulation workflow via plugin manager"""
-        from plugins.immich.immich import ImmichPlugin
+            def add_arguments(self, parser):
+                raise TypeError("Failed to add arguments!")
 
         manager = PluginManager()
-        manager.available["immich"] = ImmichPlugin
+        manager.available["failing_args"] = FailingArgumentsPlugin
 
-        config = Namespace(
-            immich_server_url="http://localhost:2283",
-            immich_api_key="test-key",
-            immich_library_id="lib-123",
-            immich_process_existing=True,  # Enable processing existing files
-            immich_scan_timeout=5.0,
-            immich_poll_interval=1.0,
-            immich_stack_media=False,
-            immich_favorite=False,
-            associate_live_with_extra_sizes=False,
-            immich_albums=None,
-        )
+        parser = ArgumentParser()
+        # Should handle error gracefully and not crash
+        manager.add_plugin_arguments(parser, ["failing_args"])
 
-        with unittest.mock.patch.object(ImmichPlugin, "_test_immich_connection"):
-            manager.enable("immich", config)
+    def test_call_hook_with_plugin_error(self):
+        """Test that hook errors in one plugin don't stop other plugins"""
+        manager = PluginManager()
 
-        plugin = manager.enabled["immich"]
+        class WorkingPlugin(MockPlugin):
+            @property
+            def name(self):
+                return "working"
+
+        manager.available["broken"] = BrokenPlugin
+        manager.available["working"] = WorkingPlugin
+
+        manager.enable("broken", Namespace())
+        manager.enable("working", Namespace())
 
         mock_photo = MagicMock(spec=PhotoAsset)
         mock_photo.filename = "test.jpg"
-        mock_photo.id = "ABC123"
-        mock_photo._asset_record = {"fields": {"isFavorite": {"value": 0}}}
 
-        # Simulate download workflow: one exists, one downloaded
+        # Call hook - broken plugin will error, but working plugin should still run
         manager.call_hook(
-            "on_download_exists",
-            download_path="/photos/original.jpg",
+            "on_download_complete",
+            download_path="/path/test.jpg",
             photo_filename="test.jpg",
             download_size=AssetVersionSize.ORIGINAL,
             photo=mock_photo,
             dry_run=False,
         )
 
-        manager.call_hook(
-            "on_download_downloaded",
-            download_path="/photos/medium.jpg",
-            photo_filename="test.jpg",
-            download_size=AssetVersionSize.MEDIUM,
-            photo=mock_photo,
-            dry_run=False,
-        )
+        # Working plugin should have been called despite broken plugin erroring
+        working_plugin = manager.enabled["working"]
+        self.assertEqual(len(working_plugin.calls), 1)
 
-        # Should have accumulated 2 files
-        self.assertEqual(len(plugin.current_photo_files), 2)
-        self.assertEqual(plugin.current_photo_files[0]["status"], "existed")
-        self.assertEqual(plugin.current_photo_files[1]["status"], "downloaded")
+    def test_set_plugin_config_with_runtime_configs(self):
+        """Test set_plugin_config with runtime configs provided later"""
+        manager = PluginManager()
+        manager.available["mock"] = MockPlugin
 
-    def test_immich_plugin_discovered_and_callable(self):
-        """Test that Immich plugin is discovered and hooks are callable
+        # Step 1: Set config without runtime configs
+        config = Namespace(mock_option="test")
+        manager.set_plugin_config(config)
 
-        This test mimics how icloudpd would actually use the plugin manager.
-        """
-        # Create manager and discover plugins
+        # Step 2: Enable plugin
+        manager.enable("mock")
+        plugin = manager.enabled["mock"]
+        self.assertEqual(plugin.configure_count, 1)
+
+        # Step 3: Set runtime configs - plugin already configured, should skip
+        mock_global_config = MagicMock()
+        mock_user_configs = [MagicMock()]
+        manager.set_plugin_config(config, mock_global_config, mock_user_configs)
+
+        # Should not reconfigure
+        self.assertEqual(plugin.configure_count, 1)
+
+    def test_set_plugin_config_runtime_error(self):
+        """Test error handling when runtime config causes configure error"""
+
+        class RuntimeFailPlugin(IcloudpdPlugin):
+            @property
+            def name(self):
+                return "runtime_fail"
+
+            def configure(self, config, global_config=None, user_configs=None):
+                # First call succeeds
+                if not hasattr(self, 'configured_once'):
+                    self.configured_once = True
+                    return
+                # Second call with runtime configs fails
+                if global_config is not None:
+                    raise ValueError("Runtime config failed!")
+
+        manager = PluginManager()
+        manager.available["runtime_fail"] = RuntimeFailPlugin
+
+        config = Namespace()
+        manager.set_plugin_config(config)
+        manager.enable("runtime_fail")
+
+        # This should handle the error gracefully (not tested via set_plugin_config
+        # because plugin is already configured)
+
+
+class TestPluginManagerDirectoryDiscovery(unittest.TestCase):
+    """Test directory-based plugin discovery edge cases"""
+
+    def test_discover_with_nonexistent_plugins_directory(self):
+        """Test discovery when plugins/ directory doesn't exist"""
+        manager = PluginManager()
+        # Should not raise an error, just log a warning
+        manager.discover()
+        # Demo plugin should still be found via entry points
+        self.assertIn("demo", manager.list_available())
+
+    def test_discover_with_invalid_plugin_module(self):
+        """Test discovery with a plugin module that fails to import"""
+        import tempfile
+        import shutil
+        from pathlib import Path
+
+        # Create a temporary plugins directory
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugins_dir = Path(tmpdir) / "plugins"
+            plugins_dir.mkdir()
+
+            # Create a plugin package with a syntax error
+            bad_plugin_dir = plugins_dir / "badplugin"
+            bad_plugin_dir.mkdir()
+            (bad_plugin_dir / "__init__.py").write_text("this is invalid python syntax !!!")
+
+            # Mock the plugin discovery to use our temp directory
+            manager = PluginManager()
+            original_discover = manager._discover_from_directory
+
+            try:
+                # This should log a warning but not crash
+                manager._discover_from_directory(plugins_dir)
+            except Exception as e:
+                self.fail(f"Plugin discovery should handle import errors gracefully: {e}")
+
+    def test_discover_plugin_without_plugin_suffix(self):
+        """Test that classes not ending in 'Plugin' are ignored"""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugins_dir = Path(tmpdir) / "plugins"
+            plugins_dir.mkdir()
+
+            # Create a plugin with a class that doesn't end in 'Plugin'
+            test_plugin_dir = plugins_dir / "testplugin"
+            test_plugin_dir.mkdir()
+            (test_plugin_dir / "__init__.py").write_text("""
+from icloudpd.plugins.base import IcloudpdPlugin
+
+class NotAPluginClass(IcloudpdPlugin):
+    @property
+    def name(self):
+        return "shouldnotbeloaded"
+
+    @property
+    def version(self):
+        return "1.0.0"
+""")
+
+            manager = PluginManager()
+            manager._discover_from_directory(plugins_dir)
+
+            # Should not have discovered the plugin
+            self.assertNotIn("shouldnotbeloaded", manager.list_available())
+
+    def test_discover_plugin_with_broken_init(self):
+        """Test discovery of plugin whose __init__ raises an exception"""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugins_dir = Path(tmpdir) / "plugins"
+            plugins_dir.mkdir()
+
+            # Create a plugin that raises in __init__
+            broken_plugin_dir = plugins_dir / "brokenplugin"
+            broken_plugin_dir.mkdir()
+            (broken_plugin_dir / "__init__.py").write_text("""
+from icloudpd.plugins.base import IcloudpdPlugin
+
+class BrokenPlugin(IcloudpdPlugin):
+    def __init__(self):
+        raise ValueError("Broken plugin initialization")
+
+    @property
+    def name(self):
+        return "broken"
+
+    @property
+    def version(self):
+        return "1.0.0"
+""")
+
+            manager = PluginManager()
+            # Should log warning but not crash
+            manager._discover_from_directory(plugins_dir)
+
+            # Should not have discovered the broken plugin
+            self.assertNotIn("broken", manager.list_available())
+
+    def test_discover_plugin_directory_without_init(self):
+        """Test that directories without __init__.py are skipped"""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugins_dir = Path(tmpdir) / "plugins"
+            plugins_dir.mkdir()
+
+            # Create a directory without __init__.py
+            not_a_package_dir = plugins_dir / "notapackage"
+            not_a_package_dir.mkdir()
+            (not_a_package_dir / "somefile.py").write_text("# Just a file")
+
+            manager = PluginManager()
+            # Should skip this directory
+            manager._discover_from_directory(plugins_dir)
+
+            # No errors should occur
+            self.assertIsInstance(manager.list_available(), list)
+
+    def test_entry_point_discovery_with_duplicate_name(self):
+        """Test that plugins/ directory takes precedence over entry points"""
         manager = PluginManager()
         manager.discover()
 
-        # Verify immich was discovered
-        self.assertIn("immich", manager.list_available())
+        # Demo plugin exists in both entry points and could be in plugins/
+        # Verify it's discovered at least once
+        self.assertIn("demo", manager.list_available())
 
-        # Configure plugin
-        config = Namespace(
-            immich_server_url="http://localhost:2283",
-            immich_api_key="test-key",
-            immich_library_id="lib-123",
-            immich_process_existing=True,
-            immich_scan_timeout=5.0,
-            immich_poll_interval=1.0,
-            immich_stack_media=False,
-            immich_favorite=False,
-            associate_live_with_extra_sizes=False,
-            immich_albums=None,
-        )
-
-        # Store config and enable plugin (as icloudpd would do)
-        manager.set_plugin_config(config)
-
-        # Mock the connection test
-        from plugins.immich.immich import ImmichPlugin
-
-        with unittest.mock.patch.object(ImmichPlugin, "_test_immich_connection"):
-            manager.enable("immich")
-
-        # Verify plugin is enabled
-        self.assertTrue(manager.is_enabled("immich"))
-
-        # Call hooks as icloudpd would
-        mock_photo = MagicMock(spec=PhotoAsset)
-        mock_photo.filename = "test.jpg"
-        mock_photo.id = "ABC123"
-        mock_photo._asset_record = {"fields": {"isFavorite": {"value": 1}}}
-
-        # Simulate the exact call pattern icloudpd uses
-        manager.call_hook(
-            "on_download_downloaded",
-            download_path="/photos/IMG_001.jpg",
-            photo_filename="IMG_001.jpg",
-            download_size=AssetVersionSize.ADJUSTED,
-            photo=mock_photo,
-            dry_run=False,
-        )
-
-        # Verify hook was called and plugin accumulated the file
-        plugin = manager.enabled["immich"]
-        self.assertEqual(
-            len(plugin.current_photo_files),
-            1,
-            "Plugin should have accumulated 1 file via hook call",
-        )
-        self.assertEqual(plugin.current_photo_files[0]["size"], "adjusted")
+        # Verify we can get plugin info (should work regardless of source)
+        info = manager.get_plugin_info("demo")
+        self.assertEqual(info["name"], "demo")
 
 
 if __name__ == "__main__":

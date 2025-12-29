@@ -5,7 +5,7 @@ import unittest
 from argparse import ArgumentParser, Namespace
 from unittest.mock import Mock, patch
 
-from plugins.immich.immich import AlbumRule, ImmichPlugin, _parse_sizes
+from plugins.immich.immich import AlbumRule, ImmichPlugin, _parse_batch_size, _parse_sizes
 from pyicloud_ipd.services.photos import PhotoAsset
 
 
@@ -1202,6 +1202,128 @@ class TestImmichPluginBatchProcessing(unittest.TestCase):
 
         # Both should be in batch - batching applies to all processing
         self.assertEqual(len(batch_item["files"]), 2)
+
+
+class TestImmichPluginDirectoryValidationFull(unittest.TestCase):
+    """Full tests for directory validation"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.plugin = ImmichPlugin()
+        self.plugin.server_url = "http://localhost:2283"
+        self.plugin.api_key = "test-api-key"
+        self.plugin.library_id = "test-library-id"
+
+    @patch("plugins.immich.immich.requests.get")
+    def test_validate_directories_success(self, mock_get):
+        """Test successful directory validation"""
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "importPaths": ["/mnt/photos", "/backup/photos"]
+        }
+        mock_get.return_value = mock_response
+
+        # Create mock user configs
+        user_config = Mock()
+        user_config.directory = "/mnt/photos/icloud"
+        user_configs = [user_config]
+
+        # Should not raise
+        self.plugin._validate_directories(user_configs)
+
+    @patch("plugins.immich.immich.requests.get")
+    def test_validate_directories_no_import_paths(self, mock_get):
+        """Test validation with no importPaths"""
+        mock_response = Mock()
+        mock_response.json.return_value = {"importPaths": []}
+        mock_get.return_value = mock_response
+
+        user_config = Mock()
+        user_config.directory = "/mnt/photos/icloud"
+        user_configs = [user_config]
+
+        with self.assertRaises(SystemExit):
+            self.plugin._validate_directories(user_configs)
+
+    @patch("plugins.immich.immich.requests.get")
+    def test_validate_directories_invalid_path(self, mock_get):
+        """Test validation with path outside importPaths"""
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "importPaths": ["/mnt/photos"]
+        }
+        mock_get.return_value = mock_response
+
+        user_config = Mock()
+        user_config.directory = "/other/path/icloud"
+        user_configs = [user_config]
+
+        with self.assertRaises(SystemExit):
+            self.plugin._validate_directories(user_configs)
+
+    @patch("plugins.immich.immich.requests.get")
+    def test_validate_directories_with_date_templates(self, mock_get):
+        """Test validation strips date templates"""
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "importPaths": ["/mnt/photos"]
+        }
+        mock_get.return_value = mock_response
+
+        user_config = Mock()
+        user_config.directory = "/mnt/photos/{:%Y}/{:%m}"
+        user_configs = [user_config]
+
+        # Should not raise - date templates are stripped
+        self.plugin._validate_directories(user_configs)
+
+
+
+class TestParseBatchSize(unittest.TestCase):
+    """Test _parse_batch_size helper function"""
+
+    def test_parse_batch_size_none(self):
+        """Test None returns 0"""
+        result = _parse_batch_size(None)
+        self.assertEqual(result, 0)
+
+    def test_parse_batch_size_all_lowercase(self):
+        """Test 'all' returns 0"""
+        result = _parse_batch_size("all")
+        self.assertEqual(result, 0)
+
+    def test_parse_batch_size_all_uppercase(self):
+        """Test 'ALL' returns 0"""
+        result = _parse_batch_size("ALL")
+        self.assertEqual(result, 0)
+
+    def test_parse_batch_size_valid_integer(self):
+        """Test valid integer"""
+        result = _parse_batch_size("10")
+        self.assertEqual(result, 10)
+
+    def test_parse_batch_size_one(self):
+        """Test batch size of 1"""
+        result = _parse_batch_size("1")
+        self.assertEqual(result, 1)
+
+    def test_parse_batch_size_zero_raises(self):
+        """Test that 0 raises error"""
+        with self.assertRaises(argparse.ArgumentTypeError) as context:
+            _parse_batch_size("0")
+        self.assertIn("must be >= 1", str(context.exception))
+
+    def test_parse_batch_size_negative_raises(self):
+        """Test that negative raises error"""
+        with self.assertRaises(argparse.ArgumentTypeError) as context:
+            _parse_batch_size("-5")
+        self.assertIn("must be >= 1", str(context.exception))
+
+    def test_parse_batch_size_invalid_string_raises(self):
+        """Test that invalid string raises error"""
+        with self.assertRaises(argparse.ArgumentTypeError) as context:
+            _parse_batch_size("invalid")
+        self.assertIn("Invalid batch size", str(context.exception))
 
 
 if __name__ == "__main__":

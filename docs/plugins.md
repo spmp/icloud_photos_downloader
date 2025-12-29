@@ -620,24 +620,114 @@ def on_run_completed(self, dry_run):
 
 ## Testing Your Plugin
 
+### Test Organization
+
+Tests should live alongside your plugin code for easy distribution and maintenance:
+
+```
+plugins/
+└── myplugin/
+    ├── __init__.py
+    ├── myplugin.py
+    └── tests/
+        ├── __init__.py
+        └── test_myplugin.py
+```
+
+This structure:
+- Keeps tests with the plugin they test
+- Makes the plugin self-contained and distributable
+- Works automatically with pytest discovery
+
+### Setting Up Tests
+
+1. **Create test directory structure:**
+   ```bash
+   mkdir -p plugins/myplugin/tests
+   touch plugins/myplugin/tests/__init__.py
+   touch plugins/myplugin/tests/test_myplugin.py
+   ```
+
+2. **Configure pytest** (already configured in `pyproject.toml`):
+   ```toml
+   [tool.pytest.ini_options]
+   testpaths = [
+       "tests",      # Core icloudpd tests
+       "src",        # Doctests
+       "plugins"     # Plugin tests (auto-discovers plugins/*/tests/)
+   ]
+   pythonpath = [
+       "src",
+       "."           # Needed for plugins directory
+   ]
+   ```
+
+3. **Run your plugin tests:**
+   ```bash
+   # Run all plugin tests
+   pytest plugins/myplugin/tests/
+
+   # Run specific test file
+   pytest plugins/myplugin/tests/test_myplugin.py
+
+   # Run with coverage
+   pytest plugins/myplugin/tests/ --cov=plugins.myplugin.myplugin --cov-report=term-missing
+   ```
+
 ### Unit Testing
 
+Write comprehensive unit tests for your plugin logic:
+
 ```python
+"""Tests for MyPlugin"""
+
+import argparse
 import unittest
-from unittest.mock import Mock
+from argparse import ArgumentParser, Namespace
+from unittest.mock import Mock, patch
+
+from plugins.myplugin.myplugin import MyPlugin
 from pyicloud_ipd.services.photos import PhotoAsset
 from pyicloud_ipd.version_size import AssetVersionSize
 
-class TestMyPlugin(unittest.TestCase):
-    def test_accumulation(self):
-        plugin = MyPlugin()
-        plugin.configure(Mock(myplugin_option='test'))
 
+class TestMyPluginBasics(unittest.TestCase):
+    """Test basic plugin functionality"""
+
+    def test_plugin_initialization(self):
+        """Test plugin initializes correctly"""
+        plugin = MyPlugin()
+        self.assertEqual(plugin.name, "myplugin")
+        self.assertEqual(plugin.version, "1.0.0")
+
+    def test_add_arguments(self):
+        """Test arguments are added to parser"""
+        plugin = MyPlugin()
+        parser = ArgumentParser()
+        plugin.add_arguments(parser)
+
+        # Parse with plugin args
+        args = parser.parse_args(['--myplugin-option', 'test'])
+        self.assertEqual(args.myplugin_option, 'test')
+
+
+class TestMyPluginHooks(unittest.TestCase):
+    """Test plugin hook methods"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.plugin = MyPlugin()
+        config = Namespace(myplugin_option='test')
+        self.plugin.configure(config)
+
+    def test_file_accumulation(self):
+        """Test files are accumulated correctly"""
         mock_photo = Mock(spec=PhotoAsset)
         mock_photo.filename = 'test.jpg'
+        mock_photo.id = 'ABC123'
 
         # Simulate download
-        plugin.on_download_downloaded(
+        self.plugin.on_download_downloaded(
             download_path='/path/test.jpg',
             photo_filename='test.jpg',
             download_size=AssetVersionSize.ORIGINAL,
@@ -646,28 +736,174 @@ class TestMyPlugin(unittest.TestCase):
         )
 
         # Verify accumulation
-        self.assertEqual(len(plugin.current_files), 1)
+        self.assertEqual(len(self.plugin.current_files), 1)
+        self.assertEqual(self.plugin.current_files[0]['path'], '/path/test.jpg')
+
+    def test_all_sizes_complete_clears_files(self):
+        """Test completion clears accumulated files"""
+        mock_photo = Mock(spec=PhotoAsset)
+        mock_photo.filename = 'test.jpg'
+
+        # Add some files
+        self.plugin.current_files.append({'path': '/test.jpg'})
 
         # Simulate completion
-        plugin.on_download_all_sizes_complete(
+        self.plugin.on_download_all_sizes_complete(
             photo=mock_photo,
             dry_run=False
         )
 
         # Verify cleared
-        self.assertEqual(len(plugin.current_files), 0)
+        self.assertEqual(len(self.plugin.current_files), 0)
+
+    def test_dry_run_mode(self):
+        """Test dry run doesn't perform actual operations"""
+        mock_photo = Mock(spec=PhotoAsset)
+        mock_photo.filename = 'test.jpg'
+
+        self.plugin.current_files.append({'path': '/test.jpg'})
+
+        # Process in dry run mode
+        self.plugin.on_download_all_sizes_complete(
+            photo=mock_photo,
+            dry_run=True
+        )
+
+        # Should still clear files but not perform actions
+        self.assertEqual(len(self.plugin.current_files), 0)
+
+
+class TestMyPluginWithMocks(unittest.TestCase):
+    """Test plugin with external API calls mocked"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.plugin = MyPlugin()
+        self.plugin.api_url = "http://localhost:8080"
+        self.plugin.api_key = "test-key"
+
+    @patch("plugins.myplugin.myplugin.requests.post")
+    def test_api_call_success(self, mock_post):
+        """Test successful API call"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"success": True}
+        mock_post.return_value = mock_response
+
+        result = self.plugin._call_api({"data": "test"})
+        self.assertTrue(result)
+
+    @patch("plugins.myplugin.myplugin.requests.post")
+    def test_api_call_failure(self, mock_post):
+        """Test API call handles errors gracefully"""
+        mock_post.side_effect = Exception("Connection error")
+
+        # Should not raise, just log error
+        result = self.plugin._call_api({"data": "test"})
+        self.assertFalse(result)
+
+
+if __name__ == "__main__":
+    unittest.main()
 ```
 
-### Integration Testing
+### Integration Testing via Plugin Manager
 
-Test with real icloudpd:
+Test that your plugin integrates correctly with icloudpd's plugin manager:
+
+```python
+class TestMyPluginIntegration(unittest.TestCase):
+    """Test plugin works through PluginManager"""
+
+    def test_plugin_discovered(self):
+        """Test plugin is discovered by manager"""
+        from icloudpd.plugins.manager import PluginManager
+
+        manager = PluginManager()
+        manager.discover()
+
+        # Verify plugin is available
+        self.assertIn("myplugin", manager.list_available())
+
+    def test_hooks_called_via_manager(self):
+        """Test manager calls plugin hooks correctly"""
+        from icloudpd.plugins.manager import PluginManager
+
+        manager = PluginManager()
+        manager.available["myplugin"] = MyPlugin
+
+        config = Namespace(myplugin_option='test')
+        manager.enable("myplugin", config)
+
+        # Verify plugin is enabled
+        self.assertTrue(manager.is_enabled("myplugin"))
+
+        # Create mock photo
+        mock_photo = Mock(spec=PhotoAsset)
+        mock_photo.filename = 'test.jpg'
+
+        # Call hook via manager
+        manager.call_hook(
+            "on_download_downloaded",
+            download_path="/path/test.jpg",
+            photo_filename="test.jpg",
+            download_size=AssetVersionSize.ORIGINAL,
+            photo=mock_photo,
+            dry_run=False
+        )
+
+        # Verify plugin processed the hook
+        plugin = manager.enabled["myplugin"]
+        self.assertGreater(len(plugin.current_files), 0)
+```
+
+### Testing Best Practices
+
+1. **Test all hook implementations** - Ensure each hook works correctly
+2. **Test error handling** - Verify graceful degradation on failures
+3. **Test configuration** - Verify arguments parse correctly
+4. **Mock external dependencies** - Don't make real API calls in tests
+5. **Test dry run mode** - Ensure no actual operations in dry run
+6. **Use realistic test data** - Create PhotoAsset mocks that match real data
+
+### Running Tests
 
 ```bash
-# Test with demo plugin first
+# Run all tests
+pytest
+
+# Run only plugin tests
+pytest plugins/
+
+# Run specific plugin
+pytest plugins/myplugin/tests/
+
+# Run with coverage
+pytest plugins/myplugin/tests/ \
+  --cov=plugins.myplugin \
+  --cov-report=html \
+  --cov-report=term-missing
+
+# View coverage report
+open htmlcov/index.html
+```
+
+### Manual/Integration Testing
+
+Test with real icloudpd to verify end-to-end functionality:
+
+```bash
+# Test with demo plugin first (verify setup works)
 icloudpd --plugin demo --demo-verbose --recent 1
 
-# Test your plugin
+# Test your plugin in dry-run mode
 icloudpd --plugin myplugin --myplugin-option test --recent 1 --dry-run
+
+# Test with small dataset
+icloudpd --plugin myplugin --myplugin-option test --recent 5
+
+# Test full workflow
+icloudpd --plugin myplugin --myplugin-option production --recent 100
 ```
 
 ## Examples
