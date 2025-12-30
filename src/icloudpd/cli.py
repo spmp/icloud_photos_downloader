@@ -123,11 +123,11 @@ def add_options_for_user(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
     cloned.add_argument(
         "--favorite-to-rating",
         help="Set EXIF (and/or XMP sidecar if enabled) Rating for favorited photos (0-5). Default: %(const)s if no value specified",
-        nargs='?',
+        nargs="?",
         const=5,
         default=None,
         type=int,
-        choices=[0, 1, 2, 3, 4, 5]
+        choices=[0, 1, 2, 3, 4, 5],
     )
     cloned.add_argument(
         "--force-size",
