@@ -29,6 +29,8 @@ class _DefaultConfig:
     skip_live_photos: bool
     xmp_sidecar: bool
     favorite_to_rating: int | None
+    process_existing_favorites: bool
+    metadata_overwrite: bool
     force_size: bool
     auto_delete: bool
     folder_structure: str

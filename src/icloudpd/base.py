@@ -38,7 +38,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 from tzlocal import get_localzone
 
 from foundation.core import identity
-from icloudpd import download, exif_datetime
+from icloudpd import download
 from icloudpd.authentication import authenticator
 from icloudpd.autodelete import autodelete_photos
 from icloudpd.config import GlobalConfig, UserConfig
@@ -46,6 +46,7 @@ from icloudpd.counter import Counter
 from icloudpd.email_notifications import send_2sa_notification
 from icloudpd.filename_policies import build_filename_with_policies, create_filename_builder
 from icloudpd.log_level import LogLevel
+from icloudpd.metadata_management import sync_exif_metadata, sync_xmp_metadata
 from icloudpd.mfa_provider import MFAProvider
 from icloudpd.password_provider import PasswordProvider
 from icloudpd.paths import local_download_path, remove_unicode_chars
@@ -53,7 +54,6 @@ from icloudpd.plugins.manager import PluginManager
 from icloudpd.server import serve_app
 from icloudpd.status import Status, StatusExchange
 from icloudpd.string_helpers import parse_timestamp_or_timedelta, truncate_middle
-from icloudpd.xmp_sidecar import generate_xmp_file
 from pyicloud_ipd.asset_version import add_suffix_to_filename, calculate_version_filename
 from pyicloud_ipd.base import PyiCloudService
 
@@ -454,10 +454,12 @@ def _process_all_users_once(
                     user_config.dry_run,
                     user_config.file_match_policy,
                     user_config.xmp_sidecar,
-                    user_config.favorite_to_rating,
                     lp_filename_generator,
                     filename_builder,
                     user_config.align_raw,
+                    user_config.favorite_to_rating,
+                    user_config.process_existing_favorites,
+                    user_config.metadata_overwrite,
                 )
                 if user_config.directory is not None
                 else (lambda _s, _c, _p: DownloadMediaSkipped())
@@ -644,10 +646,12 @@ def download_builder(
     dry_run: bool,
     file_match_policy: FileMatchPolicy,
     xmp_sidecar: bool,
-    favorite_to_rating: int,
     lp_filename_generator: Callable[[str], str],
     filename_builder: Callable[[PhotoAsset], str],
     raw_policy: RawTreatmentPolicy,
+    favorite_to_rating: int | None,
+    process_existing_favorites: bool,
+    metadata_overwrite: bool,
     icloud: PyiCloudService,
     counter: Counter,
     photo: PhotoAsset,
@@ -773,8 +777,6 @@ def download_builder(
                         )
                     except Exception as e:
                         logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-                # logger.debug(f"HOOK: File already exists. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
-
         if not file_exists:
             counter.reset()
             if only_print_filenames:
@@ -797,70 +799,75 @@ def download_builder(
 
                 match download_result:
                     case DownloadMediaSuccess():
-                        from foundation.core import compose
-                        from foundation.string_utils import endswith, lower
-
-                        is_jpeg = compose(endswith((".jpg", ".jpeg")), lower)
-
-                        is_favorite = (
-                            photo._asset_record["fields"].get("isFavorite", {}).get("value") == 1
-                        )
-                        needs_datetime = (
-                            not dry_run
-                            and set_exif_datetime
-                            and not exif_datetime.get_photo_exif(logger, download_path)
-                        )
-                        # Write favorite status to rating EXIF field only if favorite. Consider changing this to always give a rating.
-                        needs_rating = not dry_run and favorite_to_rating and is_favorite
-
-                        if not dry_run and is_jpeg(filename) and (needs_datetime or needs_rating):
-                            datetime_str = (
-                                created_date.strftime("%Y:%m:%d %H:%M:%S")
-                                if needs_datetime
-                                else None
-                            )
-                            rating_value = favorite_to_rating if needs_rating else None
-
-                            logger.debug(
-                                "Setting EXIF for %s: datetime=%s, rating=%s",
-                                download_path,
-                                datetime_str,
-                                rating_value,
-                            )
-                            exif_datetime.set_photo_exif(
-                                logger, download_path, datetime_str, rating_value
-                            )
-
                         if not dry_run:
                             download.set_utime(download_path, created_date)
                         logger.info("Downloaded %s", truncated_path)
 
-                        if not dry_run:
-                            download.set_utime(download_path, created_date)
-                        logger.info("Downloaded %s", truncated_path)
+                        # Sync EXIF metadata for new downloads
+                        sync_exif_metadata(
+                            logger=logger,
+                            download_path=download_path,
+                            photo=photo,
+                            created_date=created_date,
+                            favorite_to_rating=favorite_to_rating,
+                            set_exif_datetime=set_exif_datetime,
+                            process_existing_favorites=False,  # Not existing for newly downloaded
+                            metadata_overwrite=metadata_overwrite,
+                            dry_run=dry_run,
+                        )
+
+                        # Sync XMP metadata for new downloads
+                        if xmp_sidecar:
+                            sync_xmp_metadata(
+                                logger=logger,
+                                download_path=download_path,
+                                photo=photo,
+                                favorite_to_rating=favorite_to_rating,
+                                process_existing_favorites=False,  # Not existing for newly downloaded
+                                metadata_overwrite=metadata_overwrite,
+                                dry_run=dry_run,
+                            )
+
+                        # HOOK: File downloaded
+                        if plugin_manager:
+                            try:
+                                plugin_manager.call_hook(
+                                    "on_download_downloaded",
+                                    download_path=download_path,
+                                    photo_filename=photo_filename,
+                                    download_size=requested_size,  # Use requested size, not fallback
+                                    photo=photo,
+                                    dry_run=dry_run,
+                                )
+                            except Exception as e:
+                                logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
                     case _:
                         # Error ADT - store it
                         last_result = download_result
-
-                # HOOK: File downloaded
-                if plugin_manager:
-                    try:
-                        plugin_manager.call_hook(
-                            "on_download_downloaded",
-                            download_path=download_path,
-                            photo_filename=photo_filename,
-                            download_size=requested_size,  # Use requested size, not fallback
-                            photo=photo,
-                            dry_run=dry_run,
-                        )
-                    except Exception as e:
-                        logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-                # logger.debug(f"HOOK: File downloaded. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
-
-        if xmp_sidecar:
-            generate_xmp_file(
-                logger, download_path, photo._asset_record, favorite_to_rating, dry_run
+        elif process_existing_favorites:
+            # For existing files, only process if process_existing_favorites is enabled
+            sync_exif_metadata(
+                logger=logger,
+                download_path=download_path,
+                photo=photo,
+                created_date=created_date,
+                favorite_to_rating=favorite_to_rating,
+                set_exif_datetime=set_exif_datetime,
+                process_existing_favorites=True,
+                metadata_overwrite=metadata_overwrite,
+                dry_run=dry_run,
             )
+
+            if xmp_sidecar:
+                sync_xmp_metadata(
+                    logger=logger,
+                    download_path=download_path,
+                    photo=photo,
+                    favorite_to_rating=favorite_to_rating,
+                    process_existing_favorites=True,
+                    metadata_overwrite=metadata_overwrite,
+                    dry_run=dry_run,
+                )
 
         # HOOK: Download complete or existing (always happens)
         if plugin_manager:
@@ -875,7 +882,6 @@ def download_builder(
                 )
             except Exception as e:
                 logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-        # logger.debug(f"HOOK: File operations complete. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
 
     # Also download the live photo if present
     if not skip_live_photos:
@@ -947,7 +953,6 @@ def download_builder(
                                 )
                             except Exception as e:
                                 logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-                        # logger.debug(f"HOOK: photo_filenameFile exists, live photo. Contexts: download_path: {lp_download_path}, photo_filename: {lp_photo_filename}, filename: {filename}, version: {version}, download_size: {lp_size}, photo: {photo}")
 
                 if not lp_file_exists:
                     truncated_path = truncate_middle(lp_download_path, 96)
@@ -979,7 +984,6 @@ def download_builder(
                                     )
                                 except Exception as e:
                                     logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-                            # logger.debug(f"HOOK: File downloaded, live photo. Contexts: download_path: {lp_download_path}, photo_filename: {lp_photo_filename}, filename: {filename}, version: {version}, download_size: {lp_size}, photo: {photo}")
 
                             # Update last_result to success if it was skipped
                             match last_result:
@@ -1012,7 +1016,6 @@ def download_builder(
                     )
                 except Exception as e:
                     logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-            # logger.debug(f"HOOK: File operations complete, live photo. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
 
     # HOOK: All file operations for image size sets complete
     if plugin_manager:
@@ -1024,7 +1027,6 @@ def download_builder(
             )
         except Exception as e:
             logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
-    # logger.debug(f"HOOK: All file operations complete for image sizes. Contexts: download_path: {download_path}, photo_filename: {photo_filename}, filename: {filename}, version: {version}, download_size: {download_size}, photo: {photo}")
 
     return last_result
 
