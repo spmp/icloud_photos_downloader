@@ -130,17 +130,17 @@ Process files that icloudpd note are already exist on disk (not just newly downl
 
 **Use case:** Initial setup or when you need full re-processing of existing files.
 
-#### Process Existing Favorites Only (`--immich-process-existing-favorites`)
+#### Process Existing Favorites Only (`--process-existing-favorites`)
 
-Mark favorited images for existing downloaded photos. This is especially ueful when combined with the `--until-found` flag as it allows for favoriting of images in iPhotos after they are taken and initialy synced to Immich. Finding the _until found_ number that suits you is key:
+Mark favorited images for existing downloaded photos. This is especially useful when combined with the `--until-found` flag as it allows for favoriting of images in iPhotos after they are taken and initially synced to Immich. Finding the _until found_ number that suits you is key:
 
 ```bash
---immich-process-existing-favorites
+--process-existing-favorites
 ```
 
 **What it does:**
 - Marks Favorites for existing images
-  
+
 **What it does NOT do:**
 - Unmarks favorites
 
@@ -163,7 +163,7 @@ icloudpd \
    --immich-stack-media \
    --associate-live-with-extra-sizes \
   --immich-favorite adjusted \
-  --immich-process-existing-favorites \
+  --process-existing-favorites \
   --immich-album [adjusted]:iCloud
 ```
 
@@ -300,7 +300,7 @@ icloudpd \
   --immich-library-id "ABC" \
   --immich-stack-media \
   --immich-favorite adjusted \
-  --immich-process-existing-favorites \
+  --process-existing-favorites \
   --associate-live-with-extra-sizes \
   --immich-scan-timeout 60.0 \
   --immich-poll-interval 1.0 \
@@ -314,7 +314,7 @@ This configuration:
 - Downloads 3 sizes (original, medium, adjusted)
 - Runs daily via `--watch-with-interval 86400`
 - Processes up to 1000 existing photos per run (`--until-found 1000`)
-- Updates favorites for existing photos (`--immich-process-existing-favorites`)
+- Updates favorites for existing photos (`--process-existing-favorites`)
 - Batches every 10 photos to reduce server load
 - Stacks all size variants together
 - Marks adjusted size as favorite in Immich

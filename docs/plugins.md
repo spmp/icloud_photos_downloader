@@ -127,10 +127,10 @@ Process existing files (not just newly downloaded):
 
 ```bash
 --immich-process-existing               # Full processing: stack, favorite, albums
---immich-process-existing-favorites     # Only update favorites on existing files
+--process-existing-favorites            # Only update favorites on existing files
 ```
 
-`--immich-process-existing` is useful for initial setup or full re-processing. `--immich-process-existing-favorites` is useful when running with `--watch-with-interval` and `--until-found` to sync favorites that were added after photos were taken.
+`--immich-process-existing` is useful for initial setup or full re-processing. `--process-existing-favorites` is useful when running with `--watch-with-interval` and `--until-found` to sync favorites that were added after photos were taken.
 
 **Batch Processing:**
 
@@ -171,7 +171,7 @@ icloudpd \
   --immich-stack-media \
   --associate-live-with-extra-sizes \
   --immich-favorite adjusted \
-  --immich-process-existing-favorites \
+  --process-existing-favorites \
   --immich-batch-process 10 \
   --immich-album "[adjusted]:iCloud"
 ```

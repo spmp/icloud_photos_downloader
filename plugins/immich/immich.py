@@ -269,7 +269,7 @@ class ImmichPlugin(IcloudpdPlugin):
         self.api_key: str | None = None
         self.library_id: str | None = None
         self.process_existing: bool = False
-        self.process_existing_favorites: bool = False
+        self.process_existing_favorites: bool = False  # Set from global --process-existing-favorites
         self.scan_timeout: float = 5.0
         self.poll_interval: float = 1.0
 
@@ -350,13 +350,6 @@ class ImmichPlugin(IcloudpdPlugin):
             "--immich-process-existing",
             action="store_true",
             help="Process files that already existed (in addition to newly downloaded files)",
-        )
-
-        group.add_argument(
-            "--immich-process-existing-favorites",
-            action="store_true",
-            help="Process only existing files that are marked as favorites in iCloud "
-            "(useful for updating favorite status after initial download)",
         )
 
         group.add_argument(
@@ -467,9 +460,6 @@ class ImmichPlugin(IcloudpdPlugin):
         self.api_key = getattr(config, "immich_api_key", None)
         self.library_id = getattr(config, "immich_library_id", None)
         self.process_existing = getattr(config, "immich_process_existing", False)
-        self.process_existing_favorites = getattr(
-            config, "immich_process_existing_favorites", False
-        )
         self.scan_timeout = getattr(config, "immich_scan_timeout", 5.0)
         self.poll_interval = getattr(config, "immich_poll_interval", 1.0)
 
@@ -527,6 +517,13 @@ class ImmichPlugin(IcloudpdPlugin):
                 print(f"Error: Invalid album rule '{rule_str}': {e}", file=sys.stderr)
                 sys.exit(1)
 
+        # Get process_existing_favorites from user_configs (only available on second call)
+        # This is a global icloudpd setting, not a plugin-specific one
+        self.process_existing_favorites = False
+        if user_configs is not None and len(user_configs) > 0:
+            # Use first user config's setting (all should be the same)
+            self.process_existing_favorites = user_configs[0].process_existing_favorites
+
         # Validation
         if self.server_url and not self.api_key:
             print("Error: Immich server URL provided but no API key", file=sys.stderr)
@@ -539,7 +536,7 @@ class ImmichPlugin(IcloudpdPlugin):
             sys.exit(1)
         if self.process_existing and self.process_existing_favorites:
             print(
-                "Error: Cannot use both --immich-process-existing and --immich-process-existing-favorites",
+                "Error: Cannot use both --immich-process-existing and --process-existing-favorites",
                 file=sys.stderr,
             )
             print(
@@ -548,7 +545,7 @@ class ImmichPlugin(IcloudpdPlugin):
             sys.exit(1)
         if self.process_existing_favorites and not self.favorite_sizes:
             print(
-                "Warning: --immich-process-existing-favorites is enabled but no favorite sizes configured",
+                "Warning: --process-existing-favorites is enabled but no favorite sizes configured",
                 file=sys.stderr,
             )
             print(
