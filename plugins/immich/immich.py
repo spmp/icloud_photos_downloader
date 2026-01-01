@@ -269,7 +269,9 @@ class ImmichPlugin(IcloudpdPlugin):
         self.api_key: str | None = None
         self.library_id: str | None = None
         self.process_existing: bool = False
-        self.process_existing_favorites: bool = False  # Set from global --process-existing-favorites
+        self.process_existing_favorites: bool = (
+            False  # Set from global --process-existing-favorites
+        )
         self.scan_timeout: float = 5.0
         self.poll_interval: float = 1.0
 

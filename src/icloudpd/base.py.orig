@@ -802,6 +802,32 @@ def download_builder(
                         if not dry_run:
                             download.set_utime(download_path, created_date)
                         logger.info("Downloaded %s", truncated_path)
+<<<<<<< HEAD
+
+                        # Sync EXIF metadata for new downloads
+                        sync_exif_metadata(
+                            logger=logger,
+                            download_path=download_path,
+                            photo=photo,
+                            created_date=created_date,
+                            favorite_to_rating=favorite_to_rating,
+                            set_exif_datetime=set_exif_datetime,
+                            process_existing_favorites=False,  # Not existing for newly downloaded
+                            metadata_overwrite=metadata_overwrite,
+                            dry_run=dry_run,
+                        )
+
+                        # Sync XMP metadata for new downloads
+                        if xmp_sidecar:
+                            sync_xmp_metadata(
+                                logger=logger,
+                                download_path=download_path,
+                                photo=photo,
+                                favorite_to_rating=favorite_to_rating,
+                                process_existing_favorites=False,  # Not existing for newly downloaded
+                                metadata_overwrite=metadata_overwrite,
+                                dry_run=dry_run,
+                            )
 
                         # HOOK: File downloaded
                         if plugin_manager:
@@ -816,6 +842,8 @@ def download_builder(
                                 )
                             except Exception as e:
                                 logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
+=======
+>>>>>>> feature/metadata-management
                     case _:
                         # Error ADT - store it
                         last_result = download_result
@@ -844,6 +872,18 @@ def download_builder(
                 dry_run=dry_run,
             )
 
+<<<<<<< HEAD
+            if xmp_sidecar:
+                sync_xmp_metadata(
+                    logger=logger,
+                    download_path=download_path,
+                    photo=photo,
+                    favorite_to_rating=favorite_to_rating,
+                    process_existing_favorites=True,
+                    metadata_overwrite=metadata_overwrite,
+                    dry_run=dry_run,
+                )
+
         # HOOK: Download complete or existing (always happens)
         if plugin_manager:
             try:
@@ -858,6 +898,8 @@ def download_builder(
             except Exception as e:
                 logger.error(f"Error in plugin cleanup: {e}", exc_info=True)
 
+=======
+>>>>>>> feature/metadata-management
     # Also download the live photo if present
     if not skip_live_photos:
         lp_size = live_photo_size

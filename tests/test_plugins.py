@@ -1,7 +1,9 @@
 """Tests for plugin system"""
 
+import tempfile
 import unittest
 from argparse import ArgumentParser, Namespace
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from icloudpd.plugins.base import IcloudpdPlugin
@@ -190,7 +192,6 @@ class TestPluginManager(unittest.TestCase):
 
     def test_configure_called_once_with_runtime_configs(self):
         """Test that configure is only called once when runtime configs are provided later"""
-        from unittest.mock import MagicMock
 
         manager = PluginManager()
         manager.available["mock"] = MockPlugin
@@ -563,7 +564,7 @@ class TestPluginManagerErrorHandling(unittest.TestCase):
 
             def configure(self, config, global_config=None, user_configs=None):
                 # First call succeeds
-                if not hasattr(self, 'configured_once'):
+                if not hasattr(self, "configured_once"):
                     self.configured_once = True
                     return
                 # Second call with runtime configs fails
@@ -594,9 +595,6 @@ class TestPluginManagerDirectoryDiscovery(unittest.TestCase):
 
     def test_discover_with_invalid_plugin_module(self):
         """Test discovery with a plugin module that fails to import"""
-        import tempfile
-        import shutil
-        from pathlib import Path
 
         # Create a temporary plugins directory
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -610,7 +608,6 @@ class TestPluginManagerDirectoryDiscovery(unittest.TestCase):
 
             # Mock the plugin discovery to use our temp directory
             manager = PluginManager()
-            original_discover = manager._discover_from_directory
 
             try:
                 # This should log a warning but not crash
@@ -620,8 +617,6 @@ class TestPluginManagerDirectoryDiscovery(unittest.TestCase):
 
     def test_discover_plugin_without_plugin_suffix(self):
         """Test that classes not ending in 'Plugin' are ignored"""
-        import tempfile
-        from pathlib import Path
 
         with tempfile.TemporaryDirectory() as tmpdir:
             plugins_dir = Path(tmpdir) / "plugins"
@@ -651,8 +646,6 @@ class NotAPluginClass(IcloudpdPlugin):
 
     def test_discover_plugin_with_broken_init(self):
         """Test discovery of plugin whose __init__ raises an exception"""
-        import tempfile
-        from pathlib import Path
 
         with tempfile.TemporaryDirectory() as tmpdir:
             plugins_dir = Path(tmpdir) / "plugins"
@@ -686,8 +679,6 @@ class BrokenPlugin(IcloudpdPlugin):
 
     def test_discover_plugin_directory_without_init(self):
         """Test that directories without __init__.py are skipped"""
-        import tempfile
-        from pathlib import Path
 
         with tempfile.TemporaryDirectory() as tmpdir:
             plugins_dir = Path(tmpdir) / "plugins"

@@ -1218,9 +1218,7 @@ class TestImmichPluginDirectoryValidationFull(unittest.TestCase):
     def test_validate_directories_success(self, mock_get):
         """Test successful directory validation"""
         mock_response = Mock()
-        mock_response.json.return_value = {
-            "importPaths": ["/mnt/photos", "/backup/photos"]
-        }
+        mock_response.json.return_value = {"importPaths": ["/mnt/photos", "/backup/photos"]}
         mock_get.return_value = mock_response
 
         # Create mock user configs
@@ -1249,9 +1247,7 @@ class TestImmichPluginDirectoryValidationFull(unittest.TestCase):
     def test_validate_directories_invalid_path(self, mock_get):
         """Test validation with path outside importPaths"""
         mock_response = Mock()
-        mock_response.json.return_value = {
-            "importPaths": ["/mnt/photos"]
-        }
+        mock_response.json.return_value = {"importPaths": ["/mnt/photos"]}
         mock_get.return_value = mock_response
 
         user_config = Mock()
@@ -1265,9 +1261,7 @@ class TestImmichPluginDirectoryValidationFull(unittest.TestCase):
     def test_validate_directories_with_date_templates(self, mock_get):
         """Test validation strips date templates"""
         mock_response = Mock()
-        mock_response.json.return_value = {
-            "importPaths": ["/mnt/photos"]
-        }
+        mock_response.json.return_value = {"importPaths": ["/mnt/photos"]}
         mock_get.return_value = mock_response
 
         user_config = Mock()
@@ -1276,7 +1270,6 @@ class TestImmichPluginDirectoryValidationFull(unittest.TestCase):
 
         # Should not raise - date templates are stripped
         self.plugin._validate_directories(user_configs)
-
 
 
 class TestParseBatchSize(unittest.TestCase):

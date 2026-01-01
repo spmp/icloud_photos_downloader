@@ -66,7 +66,7 @@ Usage:
     >>> manager.discover()  # doctest: +SKIP
     >>> config = Namespace()  # doctest: +SKIP
     >>> manager.enable("demo", config)  # doctest: +SKIP
-    >>> manager.call_hook('on_download_complete', download_path='/path/to/file')  # doctest: +SKIP
+    >>> manager.call_hook("on_download_complete", download_path="/path/to/file")  # doctest: +SKIP
 """
 
 from icloudpd.plugins.base import IcloudpdPlugin
