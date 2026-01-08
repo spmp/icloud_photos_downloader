@@ -689,6 +689,7 @@ def download_builder(
             primary_sizes,
             photo,
             lp_filename_generator,
+            filename_builder(photo),  # Pass base filename with file_match_policy applied
         )
     except KeyError as ex:
         print(f"KeyError: {ex} attribute was not found in the photo fields.")
