@@ -955,7 +955,7 @@ def download_builder(
                                     "on_download_exists_live",
                                     download_path=lp_download_path,
                                     photo_filename=lp_photo_filename,
-                                    download_size=lp_size,
+                                    requested_size=lp_size,
                                     photo=photo,
                                     dry_run=dry_run,
                                 )
@@ -986,7 +986,7 @@ def download_builder(
                                         "on_download_downloaded_live",
                                         download_path=lp_download_path,
                                         photo_filename=lp_photo_filename,
-                                        download_size=lp_size,
+                                        requested_size=lp_size,
                                         photo=photo,
                                         dry_run=dry_run,
                                     )
@@ -1018,7 +1018,7 @@ def download_builder(
                         "on_download_complete_live",
                         download_path=download_path,
                         photo_filename=photo_filename,
-                        download_size=download_size,
+                        requested_size=download_size,
                         photo=photo,
                         dry_run=dry_run,
                     )
