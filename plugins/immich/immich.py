@@ -318,7 +318,7 @@ class ImmichPlugin(IcloudpdPlugin):
     @property
     def version(self) -> str:
         """Plugin version"""
-        return "2.0.0"
+        return "2.0.3"
 
     @property
     def description(self) -> str:
@@ -564,7 +564,13 @@ class ImmichPlugin(IcloudpdPlugin):
 
         # Load pending files from previous run if batch processing is enabled (batch_size != 1)
         if self.batch_size != 1:
+            logger.info(
+                f"  Batch mode: batch_size={self.batch_size}, "
+                f"log file={self.batch_log_file}"
+            )
             self._load_pending_files()
+        else:
+            logger.debug("Batch mode inactive (immediate), skipping pending file load")
 
     def on_configure_complete(self) -> None:
         """Called after configuration is complete - display plugin status"""
@@ -599,6 +605,20 @@ class ImmichPlugin(IcloudpdPlugin):
         for rule in self.album_rules:
             logger.info(f"    - {rule}")
         logger.info("=" * 70)
+
+        # Drain any photos left over from a previous interrupted run immediately,
+        # before new photos start accumulating into the queue.
+        logger.info(f"  Startup recovery: {len(self.batch_queue)} photos in queue")
+        if self.batch_queue:
+            logger.info(
+                f"Immich: Found {len(self.batch_queue)} photos pending from previous run, "
+                f"processing now"
+            )
+            try:
+                self._process_batch()
+            except Exception as e:
+                logger.error(f"Startup recovery failed: {e}", exc_info=True)
+                logger.error(f"Pending files retained at {self.batch_log_file} for next startup")
 
     @staticmethod
     def _strip_date_templates(path: str) -> str:
@@ -1494,7 +1514,7 @@ class ImmichPlugin(IcloudpdPlugin):
         Loads any unprocessed photos from a previous run that was interrupted.
         """
         if not os.path.exists(self.batch_log_file):
-            logger.debug(f"No pending batch file found at {self.batch_log_file}")
+            logger.info(f"No pending batch file found at {self.batch_log_file}")
             return
 
         try:
@@ -1653,9 +1673,13 @@ class ImmichPlugin(IcloudpdPlugin):
         # Search without scanning first — files may already be indexed
         found_assets: Dict[str, Dict[str, Any]] = {}
         for f in all_files:
-            asset = self._search_asset_by_path(f["path"])
-            if asset:
-                found_assets[f["path"]] = asset
+            try:
+                asset = self._search_asset_by_path(f["path"])
+                if asset:
+                    found_assets[f["path"]] = asset
+            except requests.RequestException as e:
+                logger.error(f"Failed to search for asset {f['path']}: {e}")
+                raise
 
         # Trigger at most ONE scan if anything is still missing
         if len(found_assets) < len(all_files):
@@ -1685,10 +1709,14 @@ class ImmichPlugin(IcloudpdPlugin):
 
             # Search for all still-pending paths
             for path in list(pending_paths):
-                asset = self._search_asset_by_path(path)
-                if asset:
-                    found_assets[path] = asset
-                    pending_paths.discard(path)
+                try:
+                    asset = self._search_asset_by_path(path)
+                    if asset:
+                        found_assets[path] = asset
+                        pending_paths.discard(path)
+                except requests.RequestException as e:
+                    logger.error(f"Failed to search for asset {path}: {e}")
+                    raise
 
             # Process any newly complete groups
             pending_items = self._process_ready_groups(

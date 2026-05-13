@@ -1410,6 +1410,50 @@ class TestImmichConfigPassing(unittest.TestCase):
         )
 
 
+class TestImmichStartupRecovery(unittest.TestCase):
+    """Tests that pending files from a previous run are processed immediately on startup."""
+
+    def setUp(self):
+        self.plugin = ImmichPlugin()
+        self.plugin.server_url = "http://localhost:2283"
+        self.plugin.api_key = "test-key"
+        self.plugin.library_id = "lib-123"
+        self.plugin.scan_timeout = 5.0
+        self.plugin.poll_interval = 0.0
+        self.plugin.process_existing_favorites = False
+        self.plugin.stack_media = False
+        self.plugin.favorite_sizes = []
+        self.plugin.associate_live_sizes = []
+        self.plugin.album_rules = []
+        self.plugin.batch_size = 10
+
+    @patch("plugins.immich.immich.ImmichPlugin._process_batch")
+    def test_pending_queue_processed_immediately_on_configure_complete(self, mock_process_batch):
+        """Pending photos from a previous run are processed as soon as the plugin is ready."""
+        self.plugin.batch_queue = [
+            {
+                "photo_id": "p1",
+                "files": [{"path": "/photos/img1.HEIC", "size": "original", "status": "downloaded"}],
+                "is_favorite": False,
+                "created": "2024-01-01T00:00:00",
+                "filename": "img1.HEIC",
+            }
+        ]
+
+        self.plugin.on_configure_complete()
+
+        mock_process_batch.assert_called_once()
+
+    @patch("plugins.immich.immich.ImmichPlugin._process_batch")
+    def test_empty_queue_does_not_trigger_process_on_configure_complete(self, mock_process_batch):
+        """No processing is triggered on startup when there are no pending photos."""
+        self.plugin.batch_queue = []
+
+        self.plugin.on_configure_complete()
+
+        mock_process_batch.assert_not_called()
+
+
 class TestImmichBatchScanBehavior(unittest.TestCase):
     """Tests that verify a single library scan is triggered per batch, not per photo."""
 
