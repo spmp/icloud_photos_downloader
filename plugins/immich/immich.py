@@ -37,6 +37,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List
@@ -1188,11 +1189,8 @@ class ImmichPlugin(IcloudpdPlugin):
     def _ensure_assets_registered(self, files: List[Dict[str, str]]) -> Dict[str, Dict[str, Any]]:
         """Ensure all files are registered in Immich, scanning only if needed.
 
-        This implements smart scan logic:
-        - If any files are newly downloaded, always scan (they won't exist yet)
-        - If all files existed, search first without scanning
-        - If all found, skip scan (optimization)
-        - If some missing, then trigger scan
+        Always searches first. A prior scan in the same batch may have already
+        indexed these files, so we avoid triggering redundant scans.
 
         Args:
             files: List of file info dicts with 'status' and 'path' keys
@@ -1203,22 +1201,13 @@ class ImmichPlugin(IcloudpdPlugin):
         Raises:
             SystemExit: If scan needed and timeout exceeded
         """
-        has_new = _has_new_files(files)
-
-        if has_new:
-            # New files require scan
-            logger.info("  New files detected, triggering scan")
-            return self._find_assets_for_files(files, trigger_scan=True)
-
-        # All files existed - check first without scanning
-        logger.info("  All files already existed, checking if assets already registered...")
         found = self._find_assets_for_files(files, trigger_scan=False)
 
         if len(found) == len(files):
             logger.info(f"  All {len(found)} assets already registered, skipping scan")
             return found
 
-        # Some assets missing - need to scan
+        # Some assets missing - trigger scan and wait
         logger.info(f"  Found {len(found)}/{len(files)} assets, triggering scan for missing files")
         return self._find_assets_for_files(files, trigger_scan=True)
 
@@ -1384,6 +1373,7 @@ class ImmichPlugin(IcloudpdPlugin):
         photo_created: Any,
         photo_filename: str,
         favorites_only: bool = False,
+        pre_found_assets: "Dict[str, Dict[str, Any]] | None" = None,
     ) -> None:
         """Process a single photo group (all sizes of one photo).
 
@@ -1396,11 +1386,15 @@ class ImmichPlugin(IcloudpdPlugin):
             photo_created: Photo creation date for album template substitution
             photo_filename: Photo filename for logging
             favorites_only: If True, only process favoriting (skip stacking/albums/live)
+            pre_found_assets: Pre-looked-up assets keyed by path; skips scan when provided
         """
         logger.info(f"  Processing photo group: {photo_filename}")
 
         # Step 1: Ensure all files are registered in Immich
-        found_assets = self._ensure_assets_registered(files)
+        if pre_found_assets is not None:
+            found_assets = pre_found_assets
+        else:
+            found_assets = self._ensure_assets_registered(files)
 
         # Step 2: Build asset list with metadata
         assets: List[Dict[str, Any]] = []
@@ -1587,12 +1581,60 @@ class ImmichPlugin(IcloudpdPlugin):
         # Clear current photo files for next photo
         self.current_photo_files.clear()
 
+    def _process_ready_groups(
+        self,
+        pending_items: List[Dict[str, Any]],
+        found_assets: Dict[str, Dict[str, Any]],
+        successfully_processed: List[str],
+    ) -> List[Dict[str, Any]]:
+        """Process all batch items whose files are fully present in found_assets.
+
+        Args:
+            pending_items: Batch items not yet processed
+            found_assets: Assets found so far, keyed by path
+            successfully_processed: List to append successfully processed photo IDs to
+
+        Returns:
+            Remaining unprocessed batch items
+        """
+        still_pending = []
+        for batch_item in pending_items:
+            item_paths = {f["path"] for f in batch_item["files"]}
+            if not item_paths.issubset(found_assets.keys()):
+                still_pending.append(batch_item)
+                continue
+
+            photo_created = batch_item.get("created")
+            if isinstance(photo_created, str):
+                photo_created = datetime.fromisoformat(photo_created)
+
+            all_existed = all(f["status"] == "existed" for f in batch_item["files"])
+            is_favorite = batch_item["is_favorite"]
+            favorites_only = all_existed and self.process_existing_favorites and is_favorite
+
+            try:
+                self._process_photo_group(
+                    files=batch_item["files"],
+                    photo_id=batch_item["photo_id"],
+                    is_favorite=is_favorite,
+                    photo_created=photo_created,
+                    photo_filename=batch_item.get("filename", ""),
+                    favorites_only=favorites_only,
+                    pre_found_assets={p: found_assets[p] for p in item_paths},
+                )
+                successfully_processed.append(batch_item["photo_id"])
+            except Exception as e:
+                logger.error(f"Failed to process photo {batch_item['photo_id']}: {e}")
+
+        return still_pending
+
     def _process_batch(self) -> None:
         """Process all photos in the current batch queue.
 
-        Uses the unified _process_photo_group pipeline for each photo.
+        Triggers at most one library scan for the whole batch, then polls
+        until all photo groups are found, processing each group as its files
+        become available. Poll timing respects self.poll_interval.
         """
-        # Validate required configuration (should be guaranteed by configure())
         assert self.server_url is not None
         assert self.api_key is not None
         assert self.library_id is not None
@@ -1602,46 +1644,78 @@ class ImmichPlugin(IcloudpdPlugin):
             return
 
         logger.info(f"Processing batch of {len(self.batch_queue)} photos")
-        successfully_processed = []
 
-        # Process each photo in the batch using unified pipeline
+        # Collect all files across the entire batch
+        all_files: List[Dict[str, Any]] = []
         for batch_item in self.batch_queue:
+            all_files.extend(batch_item["files"])
+
+        # Search without scanning first — files may already be indexed
+        found_assets: Dict[str, Dict[str, Any]] = {}
+        for f in all_files:
+            asset = self._search_asset_by_path(f["path"])
+            if asset:
+                found_assets[f["path"]] = asset
+
+        # Trigger at most ONE scan if anything is still missing
+        if len(found_assets) < len(all_files):
+            missing_count = len(all_files) - len(found_assets)
+            logger.info(
+                f"  {missing_count}/{len(all_files)} files not yet in Immich, "
+                f"triggering library scan"
+            )
             try:
-                # Reconstruct photo_created from ISO string if needed
-                from datetime import datetime
+                self._trigger_library_scan(self.library_id)
+            except requests.RequestException as e:
+                logger.error(f"FATAL: Failed to trigger library scan: {e}")
+                sys.exit(1)
 
-                photo_created = batch_item.get("created")
-                if isinstance(photo_created, str):
-                    photo_created = datetime.fromisoformat(photo_created)
+        # Track remaining work
+        pending_items = list(self.batch_queue)
+        pending_paths = {f["path"] for f in all_files} - set(found_assets.keys())
+        successfully_processed: List[str] = []
 
-                # Calculate favorites_only flag for this batch item
-                # Same logic as immediate mode:
-                # 1. All files existed (not downloaded)
-                # 2. process_existing_favorites is enabled
-                # 3. Photo is actually marked as favorite
-                all_existed = all(f["status"] == "existed" for f in batch_item["files"])
-                is_favorite = batch_item["is_favorite"]
-                favorites_only = all_existed and self.process_existing_favorites and is_favorite
+        # Process any groups already complete before polling
+        pending_items = self._process_ready_groups(pending_items, found_assets, successfully_processed)
 
-                # Process using unified pipeline
-                self._process_photo_group(
-                    files=batch_item["files"],
-                    photo_id=batch_item["photo_id"],
-                    is_favorite=is_favorite,
-                    photo_created=photo_created,
-                    photo_filename=batch_item.get("filename", ""),
-                    favorites_only=favorites_only,
-                )
+        # Poll until all groups are processed or timeout
+        start_time = time.time()
+        while pending_items:
+            poll_start = time.time()
 
-                successfully_processed.append(batch_item["photo_id"])
+            # Search for all still-pending paths
+            for path in list(pending_paths):
+                asset = self._search_asset_by_path(path)
+                if asset:
+                    found_assets[path] = asset
+                    pending_paths.discard(path)
 
-            except Exception as e:
-                logger.error(f"Failed to process photo {batch_item['photo_id']}: {e}")
-                # Continue with next photo
+            # Process any newly complete groups
+            pending_items = self._process_ready_groups(
+                pending_items, found_assets, successfully_processed
+            )
 
-        # Clear processed photos from log
+            if not pending_items:
+                break
+
+            # Timeout check
+            elapsed = time.time() - start_time
+            if self.scan_timeout > 0 and elapsed >= self.scan_timeout:
+                for item in pending_items:
+                    missing = [f["path"] for f in item["files"] if f["path"] not in found_assets]
+                    logger.error(
+                        f"Timeout waiting for Immich assets after {self.scan_timeout}s. "
+                        f"Photo: {item.get('filename', 'unknown')}, missing: {missing}"
+                    )
+                sys.exit(1)
+
+            # Sleep for the remainder of the poll interval
+            poll_elapsed = time.time() - poll_start
+            sleep_time = max(0.0, self.poll_interval - poll_elapsed)
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
         self._clear_processed_from_log(successfully_processed)
-
         logger.info(f"Batch processing complete: {len(successfully_processed)} photos processed")
 
     # ========================================================================

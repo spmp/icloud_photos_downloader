@@ -406,7 +406,7 @@ class TestImmichPluginHooks(unittest.TestCase):
         self.plugin.on_download_exists(
             download_path="/photos/IMG_001.jpg",
             photo_filename="IMG_001.jpg",
-            download_size=download_size,
+            requested_size=download_size,
             photo=photo,
             dry_run=False,
         )
@@ -424,7 +424,7 @@ class TestImmichPluginHooks(unittest.TestCase):
         self.plugin.on_download_exists(
             download_path="/photos/IMG_001.jpg",
             photo_filename="IMG_001.jpg",
-            download_size=download_size,
+            requested_size=download_size,
             photo=photo,
             dry_run=False,
         )
@@ -447,7 +447,7 @@ class TestImmichPluginHooks(unittest.TestCase):
         self.plugin.on_download_exists(
             download_path="/photos/IMG_001.jpg",
             photo_filename="IMG_001.jpg",
-            download_size=download_size,
+            requested_size=download_size,
             photo=photo,
             dry_run=False,
         )
@@ -470,7 +470,7 @@ class TestImmichPluginHooks(unittest.TestCase):
         self.plugin.on_download_exists(
             download_path="/photos/IMG_001.jpg",
             photo_filename="IMG_001.jpg",
-            download_size=download_size,
+            requested_size=download_size,
             photo=photo,
             dry_run=False,
         )
@@ -487,7 +487,7 @@ class TestImmichPluginHooks(unittest.TestCase):
         self.plugin.on_download_downloaded(
             download_path="/photos/IMG_001.jpg",
             photo_filename="IMG_001.jpg",
-            download_size=download_size,
+            requested_size=download_size,
             photo=photo,
             dry_run=False,
         )
@@ -508,7 +508,7 @@ class TestImmichPluginHooks(unittest.TestCase):
         self.plugin.on_download_complete(
             download_path="/photos/IMG_001.jpg",
             photo_filename="IMG_001.jpg",
-            download_size=download_size,
+            requested_size=download_size,
             photo=photo,
             dry_run=False,
         )
@@ -574,9 +574,12 @@ class TestImmichPluginProcessing(unittest.TestCase):
         # Note: dry_run skips accumulation entirely
         self.assertEqual(len(self.plugin.batch_queue), 0)
 
+    @patch("plugins.immich.immich.ImmichPlugin._search_asset_by_path")
     @patch("plugins.immich.immich.ImmichPlugin._process_photo_group")
-    def test_on_download_all_sizes_complete_success(self, mock_process_photo_group):
+    def test_on_download_all_sizes_complete_success(self, mock_process_photo_group, mock_search):
         """Test successful processing workflow"""
+        mock_search.return_value = {"id": "asset-001", "livePhotoVideoId": None}
+
         mock_photo = Mock(spec=PhotoAsset)
         mock_photo.created = Mock()
         mock_photo.filename = "IMG_001.jpg"
@@ -600,9 +603,14 @@ class TestImmichPluginProcessing(unittest.TestCase):
         call_args = mock_process_photo_group.call_args
         self.assertFalse(call_args[1]["favorites_only"])  # Downloaded files get full processing
 
+    @patch("plugins.immich.immich.ImmichPlugin._search_asset_by_path")
     @patch("plugins.immich.immich.ImmichPlugin._process_photo_group")
-    def test_on_download_all_sizes_complete_existing_assets_found(self, mock_process_photo_group):
+    def test_on_download_all_sizes_complete_existing_assets_found(
+        self, mock_process_photo_group, mock_search
+    ):
         """Test that process_existing=True processes existing files"""
+        mock_search.return_value = {"id": "asset-001", "livePhotoVideoId": None}
+
         mock_photo = Mock(spec=PhotoAsset)
         mock_photo.created = Mock()
         mock_photo.filename = "IMG_001.jpg"
@@ -634,9 +642,14 @@ class TestImmichPluginProcessing(unittest.TestCase):
         # Verify accumulators were cleared at end
         self.assertEqual(len(self.plugin.current_photo_files), 0)
 
+    @patch("plugins.immich.immich.ImmichPlugin._search_asset_by_path")
     @patch("plugins.immich.immich.ImmichPlugin._process_photo_group")
-    def test_on_download_all_sizes_complete_existing_assets_missing(self, mock_process_photo_group):
+    def test_on_download_all_sizes_complete_existing_assets_missing(
+        self, mock_process_photo_group, mock_search
+    ):
         """Test that existing files are processed via batch/immediate mode"""
+        mock_search.return_value = {"id": "asset-001", "livePhotoVideoId": None}
+
         mock_photo = Mock(spec=PhotoAsset)
         mock_photo.created = Mock()
         mock_photo.filename = "IMG_001.jpg"
@@ -663,7 +676,6 @@ class TestImmichPluginProcessing(unittest.TestCase):
         self.plugin.on_download_all_sizes_complete(photo=mock_photo, dry_run=False)
 
         # Verify _process_photo_group was called
-        # The actual scan/wait logic is tested inside _process_photo_group
         mock_process_photo_group.assert_called_once()
 
 
@@ -754,22 +766,19 @@ class TestImmichPluginProcessExistingFavoritesOnly(unittest.TestCase):
         self.plugin.scan_timeout = 5.0
         self.plugin.process_existing_favorites = True
 
+    @patch("plugins.immich.immich.ImmichPlugin._search_asset_by_path")
     @patch("plugins.immich.immich.ImmichPlugin._process_photo_group")
     def test_process_existing_favorites_only_assets_already_registered(
-        self, mock_process_photo_group
+        self, mock_process_photo_group, mock_search
     ):
         """Test processing existing favorites when all files existed"""
-        # Mock photo
+        mock_search.return_value = {"id": "asset-001", "livePhotoVideoId": None}
+
         mock_photo = Mock(spec=PhotoAsset)
         mock_photo.filename = "IMG_001.HEIC"
         mock_photo.created = Mock()
-        mock_photo._asset_record = {
-            "fields": {
-                "isFavorite": {"value": 1}  # IS favorite
-            }
-        }
+        mock_photo._asset_record = {"fields": {"isFavorite": {"value": 1}}}
 
-        # Set up current_photo_files - all existed
         self.plugin.current_photo_files = [
             {
                 "status": "existed",
@@ -787,31 +796,26 @@ class TestImmichPluginProcessExistingFavoritesOnly(unittest.TestCase):
             },
         ]
 
-        # Call on_download_all_sizes_complete
         self.plugin.on_download_all_sizes_complete(photo=mock_photo, dry_run=False)
 
-        # Should call _process_photo_group with favorites_only=True
-        # (all existed + process_existing_favorites + is_favorite)
+        # all existed + process_existing_favorites + is_favorite → favorites_only=True
         mock_process_photo_group.assert_called_once()
         call_args = mock_process_photo_group.call_args
         self.assertTrue(call_args[1]["favorites_only"])
 
+    @patch("plugins.immich.immich.ImmichPlugin._search_asset_by_path")
     @patch("plugins.immich.immich.ImmichPlugin._process_photo_group")
     def test_process_existing_favorites_only_assets_missing_triggers_scan(
-        self, mock_process_photo_group
+        self, mock_process_photo_group, mock_search
     ):
         """Test that favorites_only=True when all conditions met"""
-        # Mock photo
+        mock_search.return_value = {"id": "asset-001", "livePhotoVideoId": None}
+
         mock_photo = Mock(spec=PhotoAsset)
         mock_photo.filename = "IMG_002.HEIC"
         mock_photo.created = Mock()
-        mock_photo._asset_record = {
-            "fields": {
-                "isFavorite": {"value": 1}  # IS favorite
-            }
-        }
+        mock_photo._asset_record = {"fields": {"isFavorite": {"value": 1}}}
 
-        # Set up current_photo_files - all existed
         self.plugin.current_photo_files = [
             {
                 "status": "existed",
@@ -822,30 +826,25 @@ class TestImmichPluginProcessExistingFavoritesOnly(unittest.TestCase):
             }
         ]
 
-        # Call on_download_all_sizes_complete
         self.plugin.on_download_all_sizes_complete(photo=mock_photo, dry_run=False)
 
-        # Should call _process_photo_group with favorites_only=True
         mock_process_photo_group.assert_called_once()
         call_args = mock_process_photo_group.call_args
         self.assertTrue(call_args[1]["favorites_only"])
 
+    @patch("plugins.immich.immich.ImmichPlugin._search_asset_by_path")
     @patch("plugins.immich.immich.ImmichPlugin._process_photo_group")
     def test_process_existing_favorites_only_no_favorite_sizes_configured(
-        self, mock_process_photo_group
+        self, mock_process_photo_group, mock_search
     ):
         """Test that favorites_only=False when photo is NOT favorite"""
-        # Mock photo that is NOT a favorite
+        mock_search.return_value = {"id": "asset-001", "livePhotoVideoId": None}
+
         mock_photo = Mock(spec=PhotoAsset)
         mock_photo.filename = "IMG_003.HEIC"
         mock_photo.created = Mock()
-        mock_photo._asset_record = {
-            "fields": {
-                "isFavorite": {"value": 0}  # NOT favorite
-            }
-        }
+        mock_photo._asset_record = {"fields": {"isFavorite": {"value": 0}}}
 
-        # Set up current_photo_files - all existed
         self.plugin.current_photo_files = [
             {
                 "status": "existed",
@@ -856,11 +855,9 @@ class TestImmichPluginProcessExistingFavoritesOnly(unittest.TestCase):
             }
         ]
 
-        # Call on_download_all_sizes_complete
         self.plugin.on_download_all_sizes_complete(photo=mock_photo, dry_run=False)
 
-        # Should call _process_photo_group with favorites_only=False
-        # (all existed + process_existing_favorites BUT NOT is_favorite)
+        # all existed + process_existing_favorites BUT NOT is_favorite → favorites_only=False
         mock_process_photo_group.assert_called_once()
         call_args = mock_process_photo_group.call_args
         self.assertFalse(call_args[1]["favorites_only"])
@@ -1411,6 +1408,149 @@ class TestImmichConfigPassing(unittest.TestCase):
         self.assertFalse(
             plugin1.process_existing_favorites, "Should have process_existing_favorites=False"
         )
+
+
+class TestImmichBatchScanBehavior(unittest.TestCase):
+    """Tests that verify a single library scan is triggered per batch, not per photo."""
+
+    def setUp(self):
+        self.plugin = ImmichPlugin()
+        self.plugin.server_url = "http://localhost:2283"
+        self.plugin.api_key = "test-key"
+        self.plugin.library_id = "lib-123"
+        self.plugin.scan_timeout = 5.0
+        self.plugin.poll_interval = 0.0
+        self.plugin.process_existing_favorites = False
+        self.plugin.batch_size = 0  # accumulate all, process at end
+
+    def _make_batch_item(self, photo_id: str, path: str, status: str = "downloaded") -> dict:
+        return {
+            "photo_id": photo_id,
+            "files": [{"path": path, "size": "original", "status": status}],
+            "is_favorite": False,
+            "created": "2024-01-01T00:00:00",
+            "filename": f"{photo_id}.HEIC",
+        }
+
+    @patch("plugins.immich.immich.ImmichPlugin._trigger_library_scan")
+    @patch("plugins.immich.immich.ImmichPlugin._process_photo_group")
+    @patch("plugins.immich.immich.ImmichPlugin._search_asset_by_path")
+    def test_single_scan_for_multiple_photos(self, mock_search, mock_process, mock_scan):
+        """Batch of N photos triggers exactly one library scan regardless of N."""
+        # First pass: nothing found → scan triggered. Second pass: all found.
+        mock_search.side_effect = [
+            None, None, None,   # initial search: 3 photos not found
+            {"id": "a1", "livePhotoVideoId": None},  # poll: photo 1 found
+            {"id": "a2", "livePhotoVideoId": None},  # poll: photo 2 found
+            {"id": "a3", "livePhotoVideoId": None},  # poll: photo 3 found
+        ]
+
+        self.plugin.batch_queue = [
+            self._make_batch_item("p1", "/photos/img1.HEIC"),
+            self._make_batch_item("p2", "/photos/img2.HEIC"),
+            self._make_batch_item("p3", "/photos/img3.HEIC"),
+        ]
+
+        self.plugin._process_batch()
+
+        mock_scan.assert_called_once()
+        self.assertEqual(mock_process.call_count, 3)
+
+    @patch("plugins.immich.immich.ImmichPlugin._trigger_library_scan")
+    @patch("plugins.immich.immich.ImmichPlugin._process_photo_group")
+    @patch("plugins.immich.immich.ImmichPlugin._search_asset_by_path")
+    def test_no_scan_when_all_found_immediately(self, mock_search, mock_process, mock_scan):
+        """No scan is triggered when all assets are already indexed."""
+        mock_search.return_value = {"id": "asset-001", "livePhotoVideoId": None}
+
+        self.plugin.batch_queue = [
+            self._make_batch_item("p1", "/photos/img1.HEIC", status="existed"),
+            self._make_batch_item("p2", "/photos/img2.HEIC", status="existed"),
+        ]
+
+        self.plugin._process_batch()
+
+        mock_scan.assert_not_called()
+        self.assertEqual(mock_process.call_count, 2)
+
+    @patch("plugins.immich.immich.ImmichPlugin._trigger_library_scan")
+    @patch("plugins.immich.immich.ImmichPlugin._process_photo_group")
+    @patch("plugins.immich.immich.ImmichPlugin._search_asset_by_path")
+    def test_groups_processed_as_found_not_all_at_once(self, mock_search, mock_process, mock_scan):
+        """Photos are processed as soon as their group is complete, not after all are found."""
+        processed_order = []
+
+        def capture_order(**kwargs):
+            processed_order.append(kwargs["photo_filename"])
+
+        mock_process.side_effect = capture_order
+
+        # Use call-count per path to avoid dependence on set iteration order.
+        # img1: found on 2nd call (poll 1), img2: found on 3rd call (poll 2).
+        call_counts: dict = {}
+
+        def search_side_effect(path):
+            n = call_counts.get(path, 0)
+            call_counts[path] = n + 1
+            if path == "/photos/img1.HEIC" and n >= 1:
+                return {"id": "a1", "livePhotoVideoId": None}
+            if path == "/photos/img2.HEIC" and n >= 2:
+                return {"id": "a2", "livePhotoVideoId": None}
+            return None
+
+        mock_search.side_effect = search_side_effect
+
+        self.plugin.batch_queue = [
+            self._make_batch_item("p1", "/photos/img1.HEIC"),
+            self._make_batch_item("p2", "/photos/img2.HEIC"),
+        ]
+
+        self.plugin._process_batch()
+
+        # Both photos processed, scan triggered exactly once
+        self.assertEqual(set(processed_order), {"p1.HEIC", "p2.HEIC"})
+        self.assertEqual(len(processed_order), 2)
+        mock_scan.assert_called_once()
+        # p1 must be processed before p2 (img1 found one poll before img2)
+        self.assertLess(processed_order.index("p1.HEIC"), processed_order.index("p2.HEIC"))
+
+    @patch("plugins.immich.immich.time.sleep")
+    @patch("plugins.immich.immich.ImmichPlugin._trigger_library_scan")
+    @patch("plugins.immich.immich.ImmichPlugin._process_photo_group")
+    @patch("plugins.immich.immich.ImmichPlugin._search_asset_by_path")
+    def test_poll_interval_respected(self, mock_search, mock_process, mock_scan, mock_sleep):
+        """Sleep is called between polls when assets are not yet found."""
+        self.plugin.poll_interval = 1.5
+
+        # Initial search misses; poll 1 also misses (sleep needed); poll 2 finds the asset.
+        mock_search.side_effect = [
+            None,                                       # initial: missing → scan triggered
+            None,                                       # poll 1: still missing → sleep
+            {"id": "a1", "livePhotoVideoId": None},    # poll 2: found → process
+        ]
+
+        self.plugin.batch_queue = [self._make_batch_item("p1", "/photos/img1.HEIC")]
+
+        self.plugin._process_batch()
+
+        # sleep called once (between poll 1 and poll 2) with remainder of poll_interval
+        mock_sleep.assert_called_once()
+        sleep_arg = mock_sleep.call_args[0][0]
+        self.assertGreaterEqual(sleep_arg, 0.0)
+        self.assertLessEqual(sleep_arg, 1.5)
+
+    @patch("plugins.immich.immich.ImmichPlugin._trigger_library_scan")
+    @patch("plugins.immich.immich.ImmichPlugin._search_asset_by_path")
+    def test_timeout_exits_when_assets_never_found(self, mock_search, mock_scan):
+        """sys.exit(1) is called when assets are not found within scan_timeout."""
+        self.plugin.scan_timeout = 0.1
+        self.plugin.poll_interval = 0.0
+        mock_search.return_value = None  # never found
+
+        self.plugin.batch_queue = [self._make_batch_item("p1", "/photos/img1.HEIC")]
+
+        with self.assertRaises(SystemExit):
+            self.plugin._process_batch()
 
 
 if __name__ == "__main__":
