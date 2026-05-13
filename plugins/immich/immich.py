@@ -1076,13 +1076,13 @@ class ImmichPlugin(IcloudpdPlugin):
         """
         assert self.server_url is not None
         assert self.api_key is not None
-        url = f"{self.server_url}/api/assets/{asset_id}"
+        url = f"{self.server_url}/api/assets"
         headers = {"x-api-key": self.api_key}
-        body = {"livePhotoVideoId": live_photo_video_id}
+        body = {"ids": [asset_id], "livePhotoVideoId": live_photo_video_id}
 
-        logger.debug(f"PATCH {url}")
+        logger.debug(f"PUT {url}")
         logger.debug(f"  Associating live video: {live_photo_video_id}")
-        response = requests.patch(url, headers=headers, json=body, timeout=30)
+        response = requests.put(url, headers=headers, json=body, timeout=30)
         response.raise_for_status()
         logger.debug("Live photo associated successfully")
 
