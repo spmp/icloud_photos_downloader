@@ -20,6 +20,12 @@ Synchronization logic can be adjusted with command-line parameters. Run the foll
 ``` sh 
 docker run -it --rm icloudpd/icloudpd:latest icloudpd --help
 ``` 
+## Building
+To build an image on yur local machine using local architecture for development purposes build as:
+```sh
+docker build -f Dockerfile.dev -t icloudpd:dev .
+```
+And run as above but with `icloudpd:dev` instead of `icloudpd/icloudpd:latest icloudpd`.
 
 ## Getting Docker
 

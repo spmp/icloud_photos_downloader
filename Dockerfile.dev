@@ -1,0 +1,63 @@
+# ── Stage 1: Build PyInstaller binaries from source ──────────────────────────
+FROM python:3.13-alpine3.19 AS builder
+
+RUN apk add --no-cache \
+    bash binutils cargo gcc libc-dev \
+    libffi-dev musl-dev openssl-dev patchelf pkgconfig zlib-dev
+
+WORKDIR /app
+COPY LICENSE.md README_PYPI.md requirements-pip.txt pyproject.toml ./
+COPY scripts scripts/
+COPY binary_dist binary_dist/
+COPY plugins plugins/
+COPY src src/
+
+RUN python3 -m venv .venv \
+    && . .venv/bin/activate \
+    && python3 -m pip install --disable-pip-version-check -r requirements-pip.txt \
+    && pip3 install --disable-pip-version-check . --group dev
+
+RUN . .venv/bin/activate \
+    && scripts/build_bin1 icloudpd \
+    && scripts/build_bin1 icloud
+
+# ── Stage 2: Minimal runtime image ───────────────────────────────────────────
+FROM alpine:3.18 AS runtime
+
+ENV MUSL_LOCPATH="/usr/share/i18n/locales/musl"
+RUN apk update && apk add --no-cache tzdata musl-locales musl-locales-lang
+
+WORKDIR /app
+COPY --from=builder /app/dist/icloudpd ./icloudpd
+COPY --from=builder /app/dist/icloud ./icloud
+RUN chmod +x /app/icloud /app/icloudpd
+
+ENV TZ=UTC
+EXPOSE 8080
+
+# Use a shell script to allow command selection
+COPY <<EOF /app/entrypoint.sh
+#!/bin/sh
+# If first argument is 'icloud' or 'icloudpd', run the corresponding binary
+case "\$1" in
+    icloud)
+        shift
+        exec /app/icloud "\$@"
+        ;;
+    icloudpd)
+        shift
+        exec /app/icloudpd "\$@"
+        ;;
+    *)
+        echo "Error: You must specify either 'icloud' or 'icloudpd' as the first argument."
+        echo "Usage: docker run <image> icloudpd [options]"
+        echo "   or: docker run <image> icloud [options]"
+        exit 1
+        ;;
+esac
+EOF
+
+RUN chmod +x /app/entrypoint.sh
+
+# Default entrypoint allows command selection
+ENTRYPOINT ["/app/entrypoint.sh"]
