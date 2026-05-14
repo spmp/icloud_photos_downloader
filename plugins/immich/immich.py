@@ -279,7 +279,7 @@ class ImmichPlugin(IcloudpdPlugin):
         # Batch processing configuration
         # batch_size: 0='all' (process at end), 1=immediate (default), N=batch every N photos
         self.batch_size: int = 1
-        self.batch_log_file: str = os.path.expanduser("~/.pyicloud/immich_pending_files.json")
+        self.batch_log_file: str = ""  # Set in configure()
 
         # Stacking configuration
         self.stack_media: bool = False
@@ -318,7 +318,7 @@ class ImmichPlugin(IcloudpdPlugin):
     @property
     def version(self) -> str:
         """Plugin version"""
-        return "2.0.3"
+        return "2.0.4"
 
     @property
     def description(self) -> str:
@@ -469,14 +469,14 @@ class ImmichPlugin(IcloudpdPlugin):
         if batch_arg is not False:
             self.batch_size = batch_arg  # Will be int: 0='all', 1=immediate, N=batch every N
 
-        # Batch log file — explicit flag wins; otherwise derive from cookie_directory
+        # Batch log file — explicit flag wins; otherwise use cookie_directory.
+        # Fall back to ~/.pyicloud only if cookie_directory is not configured.
         batch_log_file_arg = getattr(config, "immich_batch_log_file", None)
         if batch_log_file_arg:
             self.batch_log_file = batch_log_file_arg
         else:
-            cookie_dir = getattr(config, "cookie_directory", None)
-            if cookie_dir:
-                self.batch_log_file = os.path.join(cookie_dir, "immich_pending_files.json")
+            cookie_dir = getattr(config, "cookie_directory", None) or os.path.expanduser("~/.pyicloud")
+            self.batch_log_file = os.path.join(cookie_dir, "immich_pending_files.json")
 
         # Parse stack_media argument (False, None=all, or list of sizes)
         stack_arg = getattr(config, "immich_stack_media", False)
