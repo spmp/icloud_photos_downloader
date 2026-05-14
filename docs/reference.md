@@ -331,7 +331,7 @@ This is a list of all options available for the command line interface (CLI) of 
 (xmp-sidecar-parameter)=
 `--xmp-sidecar`
 
-:   Exports additional data as XMP sidecar files (default: don't export).
+:   Exports additional data as XMP sidecar files (default: don't export). When [`--favorite-to-rating`](favorite-to-rating-parameter) is also specified, the Rating tag is included in the sidecar.
 
     ```{versionadded} 1.25.0
     ```
@@ -340,6 +340,16 @@ This is a list of all options available for the command line interface (CLI) of 
 `--favorite-to-rating`
 
 :   Set EXIF (and/or XMP sidecar if enabled) Rating for favorited photos. Can be given without argument to set Rating to 5 or with argument (0-5).
+
+(process-existing-favorites-parameter)=
+`--process-existing-favorites`
+
+:   If specified, processes files that already exist on disk to add or update favorite ratings. Requires [`--favorite-to-rating`](favorite-to-rating-parameter). Use with [`--recent`](recent-parameter) or [`--until-found`](until-found-parameter) to limit the scope of files checked.
+
+(metadata-overwrite-parameter)=
+`--metadata-overwrite`
+
+:   If specified, overwrites existing metadata values (rating, datetime) when processing files. By default, existing values are preserved.
 
 (smtp-parameter)=
 `--smtp-username X`, `--smtp-password X`, `--smtp-host X`, `--smtp-port X`, `--smtp-no-tls`
