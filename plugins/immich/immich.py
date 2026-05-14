@@ -434,7 +434,7 @@ class ImmichPlugin(IcloudpdPlugin):
             "--immich-batch-log-file",
             metavar="PATH",
             help="Path to batch processing log file for crash recovery "
-            "(default: ~/.pyicloud/immich_pending_files.json)",
+            "(default: <cookie-directory>/immich_pending_files.json)",
         )
 
     # ========================================================================
@@ -469,10 +469,14 @@ class ImmichPlugin(IcloudpdPlugin):
         if batch_arg is not False:
             self.batch_size = batch_arg  # Will be int: 0='all', 1=immediate, N=batch every N
 
-        # Batch log file
+        # Batch log file — explicit flag wins; otherwise derive from cookie_directory
         batch_log_file_arg = getattr(config, "immich_batch_log_file", None)
         if batch_log_file_arg:
             self.batch_log_file = batch_log_file_arg
+        else:
+            cookie_dir = getattr(config, "cookie_directory", None)
+            if cookie_dir:
+                self.batch_log_file = os.path.join(cookie_dir, "immich_pending_files.json")
 
         # Parse stack_media argument (False, None=all, or list of sizes)
         stack_arg = getattr(config, "immich_stack_media", False)
