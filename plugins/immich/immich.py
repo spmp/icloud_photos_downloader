@@ -469,14 +469,19 @@ class ImmichPlugin(IcloudpdPlugin):
         if batch_arg is not False:
             self.batch_size = batch_arg  # Will be int: 0='all', 1=immediate, N=batch every N
 
-        # Batch log file — explicit flag wins; otherwise use cookie_directory.
-        # Fall back to ~/.pyicloud only if cookie_directory is not configured.
+        # Batch log file — explicit flag wins; otherwise derive from cookie_directory.
+        # cookie_directory is a per-user icloudpd setting, not a plugin arg, so it lives
+        # in user_configs, not in config.  Fall back to ~/.pyicloud if unavailable.
         batch_log_file_arg = getattr(config, "immich_batch_log_file", None)
         if batch_log_file_arg:
             self.batch_log_file = batch_log_file_arg
         else:
-            cookie_dir = getattr(config, "cookie_directory", None) or os.path.expanduser("~/.pyicloud")
+            if user_configs is not None and len(user_configs) > 0:
+                cookie_dir = os.path.expanduser(user_configs[0].cookie_directory)
+            else:
+                cookie_dir = os.path.expanduser("~/.pyicloud")
             self.batch_log_file = os.path.join(cookie_dir, "immich_pending_files.json")
+        logger.debug(f"Batch log file resolved to: {self.batch_log_file}")
 
         # Parse stack_media argument (False, None=all, or list of sizes)
         stack_arg = getattr(config, "immich_stack_media", False)

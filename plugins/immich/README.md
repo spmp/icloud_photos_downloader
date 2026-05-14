@@ -59,8 +59,8 @@ Look for the `id` field of your external library in the JSON response.
 --immich-batch-process [N|all]  Accumulate photos before processing to reduce server load.
                                 No argument or "all" = process all at end of run; N = process
                                 every N photos. Default: disabled (process each immediately).
---immich-batch-log-file PATH    Batch log file for crash recovery
-                                (default: ~/.pyicloud/immich_pending_files.json).
+--immich-batch-log-file PATH    Batch log file for crash recovery (default:
+                                {cookie_directory}/immich_pending_files.json).
 ```
 
 ### Related icloudpd Options
@@ -235,7 +235,7 @@ Batch processing reduces load on your Immich server by accumulating photos befor
 
 ### Crash Recovery
 
-The batch log file (`~/.pyicloud/immich_pending_files.json` by default) tracks unprocessed photos so an interrupted run can resume.
+The batch log file (`{cookie_directory}/immich_pending_files.json` by default) tracks unprocessed photos so an interrupted run can resume.
 
 1. During a run, each photo is added to the batch queue and written to the log file.
 2. When a batch is successfully processed, those photos are removed from the log file.
