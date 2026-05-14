@@ -273,6 +273,12 @@ def add_options_for_user(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
         type=parse_timestamp_or_timedelta_tz_error,
     )
     cloned.add_argument(
+        "--until-skip-created-before",
+        help="Stop downloading once an asset is skipped due to --skip-created-before. "
+        "Relies on iCloud delivering assets newest-first so the first skipped asset signals no older assets remain.",
+        action="store_true",
+    )
+    cloned.add_argument(
         "--skip-photos",
         help="Don't download any photos (default: download all photos and videos)",
         action="store_true",
@@ -521,6 +527,7 @@ def map_to_config(user_ns: argparse.Namespace) -> UserConfig:
         file_match_policy=FileMatchPolicy(user_ns.file_match_policy),
         skip_created_before=user_ns.skip_created_before,
         skip_created_after=user_ns.skip_created_after,
+        until_skip_created_before=user_ns.until_skip_created_before,
         skip_photos=user_ns.skip_photos,
     )
 

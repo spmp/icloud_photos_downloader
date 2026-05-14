@@ -1573,6 +1573,22 @@ def core_single_run(
                                 download_result = (
                                     DownloadMediaSkipped()
                                 )  # Filtered files are skipped
+                                if (
+                                    user_config.until_skip_created_before
+                                    and user_config.skip_created_before is not None
+                                    and item.created
+                                    < offset_to_datetime(user_config.skip_created_before)
+                                ):
+                                    threshold = offset_to_datetime(
+                                        user_config.skip_created_before
+                                    )
+                                    logger.info(
+                                        "Stopping. '%s' created %s is before %s",
+                                        item.filename,
+                                        item.created,
+                                        threshold,
+                                    )
+                                    break
 
                             if passer_result and user_config.keep_icloud_recent_days is not None:
                                 created_date = item.created.astimezone(get_localzone())

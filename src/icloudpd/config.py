@@ -52,6 +52,7 @@ class _DefaultConfig:
     file_match_policy: FileMatchPolicy
     skip_created_before: datetime.datetime | datetime.timedelta | None
     skip_created_after: datetime.datetime | datetime.timedelta | None
+    until_skip_created_before: bool
     skip_photos: bool
 
 

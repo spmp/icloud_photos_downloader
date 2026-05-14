@@ -250,6 +250,7 @@ class CliTestCase(TestCase):
                         file_match_policy=FileMatchPolicy.NAME_SIZE_DEDUP_WITH_SUFFIX,
                         skip_created_before=None,
                         skip_created_after=None,
+                        until_skip_created_before=False,
                         skip_photos=False,
                     ),
                     UserConfig(
@@ -293,6 +294,7 @@ class CliTestCase(TestCase):
                         file_match_policy=FileMatchPolicy.NAME_SIZE_DEDUP_WITH_SUFFIX,
                         skip_created_before=None,
                         skip_created_after=None,
+                        until_skip_created_before=False,
                         skip_photos=False,
                     ),
                 ],
@@ -376,6 +378,7 @@ class CliTestCase(TestCase):
                             year=2025, month=1, day=2, tzinfo=zoneinfo.ZoneInfo(key="Etc/UTC")
                         ),
                         skip_created_after=datetime.timedelta(days=2),
+                        until_skip_created_before=False,
                         skip_photos=False,
                     ),
                 ],
@@ -446,6 +449,7 @@ class CliTestCase(TestCase):
                         file_match_policy=FileMatchPolicy.NAME_SIZE_DEDUP_WITH_SUFFIX,
                         skip_created_before=None,
                         skip_created_after=None,
+                        until_skip_created_before=False,
                         skip_photos=False,
                     )
                 ],
@@ -516,6 +520,7 @@ class CliTestCase(TestCase):
                         file_match_policy=FileMatchPolicy.NAME_SIZE_DEDUP_WITH_SUFFIX,
                         skip_created_before=None,
                         skip_created_after=None,
+                        until_skip_created_before=False,
                         skip_photos=False,
                     )
                 ],
@@ -619,6 +624,7 @@ class CliTestCase(TestCase):
                         file_match_policy=FileMatchPolicy.NAME_SIZE_DEDUP_WITH_SUFFIX,
                         skip_created_before=None,
                         skip_created_after=None,
+                        until_skip_created_before=False,
                         skip_photos=False,
                     )
                 ],
@@ -688,6 +694,7 @@ class CliTestCase(TestCase):
                         file_match_policy=FileMatchPolicy.NAME_SIZE_DEDUP_WITH_SUFFIX,
                         skip_created_before=None,
                         skip_created_after=None,
+                        until_skip_created_before=False,
                         skip_photos=False,
                     )
                 ],
@@ -1072,6 +1079,7 @@ class PluginCliTestCase(TestCase):
                         file_match_policy=FileMatchPolicy.NAME_SIZE_DEDUP_WITH_SUFFIX,
                         skip_created_before=None,
                         skip_created_after=None,
+                        until_skip_created_before=False,
                         skip_photos=False,
                     ),
                 ],

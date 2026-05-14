@@ -389,6 +389,27 @@ This is a list of all options available for the command line interface (CLI) of 
     ```{note}
     The date is when the asset was created, not when it was added to iCloud.
     ```
+
+(until-skip-created-before-parameter)=
+`--until-skip-created-before`
+
+:   Stops the run as soon as an asset is skipped due to {ref}`--skip-created-before <skip-created-before-parameter>`. Requires `--skip-created-before` to have any effect.
+
+    This is an efficiency option for incremental runs. iCloud delivers assets from newest to oldest, so once an asset falls below the `--skip-created-before` threshold all subsequent assets will too. Stopping at that point avoids iterating through the remainder of the library unnecessarily.
+
+    A typical use case is a periodic sync that only cares about recent photos:
+
+    ```bash
+    icloudpd --skip-created-before 30d --until-skip-created-before ...
+    ```
+
+    ```{versionadded} 1.32.2
+    ```
+
+    ```{warning}
+    This relies on iCloud consistently returning assets newest-first. If the ordering is not guaranteed for a particular album or query, some assets in the window may be missed.
+    ```
+
 (plugin-parameter)=
 `--plugin X`
 

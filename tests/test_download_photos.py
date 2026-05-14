@@ -2145,6 +2145,45 @@ class DownloadPhotoTestCase(TestCase):
         photo_modified_time = datetime.datetime.fromtimestamp(photo_mtime, datetime.timezone.utc)
         self.assertEqual("2018-07-31 07:22:24", photo_modified_time.strftime("%Y-%m-%d %H:%M:%S"))
 
+    def test_until_skip_created_before(self) -> None:
+        base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])
+
+        files_to_create: List[Tuple[str, str, int]] = []
+        files_to_download = [("2018/07/31", "IMG_7409.JPG")]
+
+        data_dir, result = run_icloudpd_test(
+            self.assertEqual,
+            self.root_path,
+            base_dir,
+            "listing_photos.yml",
+            files_to_create,
+            files_to_download,
+            [
+                "--username",
+                "jdoe@gmail.com",
+                "--password",
+                "password1",
+                "--recent",
+                "5",
+                "--skip-videos",
+                "--skip-live-photos",
+                "--no-progress-bar",
+                "--skip-created-before",
+                "2018-07-31",
+                "--until-skip-created-before",
+            ],
+        )
+
+        assert result.exit_code == 0
+
+        self.assertIn("Looking up all photos...", result.output)
+        # IMG_7409.JPG (2018-07-31) should be downloaded
+        file_path = os.path.join(data_dir, os.path.normpath("2018/07/31/IMG_7409.JPG"))
+        self.assertIn(f"Downloading {file_path}", result.output)
+        # Run should stop after first skip_created_before hit, not continue to IMG_7407.JPG
+        self.assertIn("Stopping.", result.output)
+        self.assertNotIn("IMG_7407.JPG", result.output)
+
     def test_download_and_skip_new(self) -> None:
         base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])
 
