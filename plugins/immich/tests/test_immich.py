@@ -718,6 +718,54 @@ class TestImmichPluginStacking(unittest.TestCase):
         # First should be adjusted (higher priority)
         self.assertEqual(called_ids[0], "asset-001")
 
+    @patch("plugins.immich.immich.ImmichPlugin._create_stack")
+    def test_process_stacking_skips_if_already_stacked_together(self, mock_create_stack):
+        """Assets that already share the same stack must not be re-stacked.
+
+        Regression test: reprocessing already-stacked assets (e.g. a second
+        --immich-process-existing run, or a later run where all sizes are now
+        registered) used to call _create_stack unconditionally. Immich's
+        stack-merge (POST /api/stacks) only deletes the old stack if its
+        *primary* asset is included in the new assetIds list — if a rerun
+        picks a different primary, the old stack is silently orphaned (left
+        with just its old primary, never deleted, no StackDelete event),
+        which shows up as a duplicate favorited stack in the Immich mobile
+        app while the web app looks fine.
+        """
+        assets = [
+            {"asset_id": "asset-001", "size": "adjusted", "stack_id": "stack-123"},
+            {"asset_id": "asset-002", "size": "original", "stack_id": "stack-123"},
+        ]
+
+        self.plugin._process_stacking(assets)
+
+        mock_create_stack.assert_not_called()
+
+    @patch("plugins.immich.immich.ImmichPlugin._create_stack")
+    def test_process_stacking_restacks_when_not_fully_stacked_together(self, mock_create_stack):
+        """A newly-registered size variant without a stack yet still triggers stacking."""
+        assets = [
+            {"asset_id": "asset-001", "size": "adjusted", "stack_id": "stack-123"},
+            {"asset_id": "asset-002", "size": "original", "stack_id": "stack-123"},
+            {"asset_id": "asset-003", "size": "medium", "stack_id": None},
+        ]
+
+        self.plugin._process_stacking(assets)
+
+        mock_create_stack.assert_called_once()
+
+    @patch("plugins.immich.immich.ImmichPlugin._create_stack")
+    def test_process_stacking_restacks_when_split_across_two_stacks(self, mock_create_stack):
+        """Assets currently split across two different stacks get consolidated."""
+        assets = [
+            {"asset_id": "asset-001", "size": "adjusted", "stack_id": "stack-123"},
+            {"asset_id": "asset-002", "size": "original", "stack_id": "stack-456"},
+        ]
+
+        self.plugin._process_stacking(assets)
+
+        mock_create_stack.assert_called_once()
+
 
 class TestImmichPluginFavorites(unittest.TestCase):
     """Test ImmichPlugin favorites functionality"""

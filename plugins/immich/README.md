@@ -217,6 +217,75 @@ icloudpd \
 
 ---
 
+## Duplicate Favorite Stacks (fixed in 2.0.5)
+
+Versions of this plugin before 2.0.5 could leave behind an orphaned Immich
+stack when a photo group that was already stacked got reprocessed (e.g.
+running `--immich-process-existing` more than once, or a later run picking
+up a new size variant). Immich's stack-merge only cleans up a previous
+stack when that stack's primary asset is included in the new stacking call
+— if a rerun settled on a different primary, every *other* member of the
+old stack got reassigned to the new one, but the old primary itself was
+never part of the new call, so its old stack was never looked up, merged,
+or deleted. It was left behind alone, in a stack of one. Immich's web app
+queries live state, so it just showed that lone photo as a normal favorite.
+Clients with a local sync cache (notably the mobile app) could retain a
+stale record of that photo's previous stack membership from before the
+reassignment, so the same favorited photo could appear twice there.
+
+**2.0.5 fixes this going forward**: `_process_stacking` now skips
+re-stacking whenever the target assets already share a stack, so this
+plugin no longer creates these orphans.
+
+**This does not clean up duplicates from before the upgrade.** Run
+`plugins/immich/scripts/dedupe_favorite_stacks.py` once, before or after
+upgrading, to find and remove any leftover single-asset stacks that already
+exist in your library:
+
+```bash
+# API key via argument
+python3 plugins/immich/scripts/dedupe_favorite_stacks.py \
+  --server-url https://immich.example.com \
+  --api-key YOUR_API_KEY
+
+# ...or via environment variable
+export IMMICH_API_KEY=YOUR_API_KEY
+python3 plugins/immich/scripts/dedupe_favorite_stacks.py \
+  --server-url https://immich.example.com
+
+# Immich's stacks API is account-wide, not per-library, so this scans every
+# stack the API key's user owns by default. Pass --library-id to restrict
+# deletions to the library this plugin manages (each stack's remaining
+# asset carries its own libraryId, checked client-side):
+python3 plugins/immich/scripts/dedupe_favorite_stacks.py \
+  --server-url https://immich.example.com --library-id YOUR_LIBRARY_ID
+
+# all forms above default to a dry-run report; add --apply to actually delete
+python3 plugins/immich/scripts/dedupe_favorite_stacks.py \
+  --server-url https://immich.example.com --apply
+```
+
+The script treats any stack with 0 or 1 live member assets as a leftover
+from this behavior — Immich's own stack-create API requires at least 2
+assets, so a live stack that thin can't be one a user or the plugin made on
+purpose. Deleting it doesn't touch or unfavorite the asset itself.
+
+Fully-empty (0-asset) stacks have no remaining asset to check against
+`--library-id`, so when that flag is set they're listed separately as
+"skipped" rather than being silently included or excluded — rerun without
+`--library-id` if you want those covered too.
+
+If duplicates are still visible in the mobile app afterwards, force a full
+resync (log out and back in, or clear local app data) so it drops its stale
+cache of the old stack membership.
+
+> **Note**: This is unrelated to Immich's own "Deduplicate" feature
+> (Utilities → Duplicates), which detects duplicate *asset content* via
+> checksum. That's a separate, unaffected feature — use it as normal for
+> true file-level duplicates.
+
+---
+
 ## Batch Processing (`--immich-batch-process`)
 
 Batch processing reduces load on your Immich server by accumulating photos before triggering library scans, so scans happen once per batch rather than once per photo. This prevents OOM errors on the Immich server when processing large libraries.

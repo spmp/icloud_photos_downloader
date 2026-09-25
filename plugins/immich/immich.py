@@ -318,7 +318,7 @@ class ImmichPlugin(IcloudpdPlugin):
     @property
     def version(self) -> str:
         """Plugin version"""
-        return "2.0.4"
+        return "2.0.5"
 
     @property
     def description(self) -> str:
@@ -1253,6 +1253,24 @@ class ImmichPlugin(IcloudpdPlugin):
         if not self.stack_media or len(assets) <= 1:
             return
 
+        # Skip if every asset already belongs to the same stack. Immich's
+        # stack-merge (POST /api/stacks) only deletes a prior stack when that
+        # stack's primary asset is included in the new call — if a rerun
+        # picks a different primary (e.g. a new size variant changes the
+        # priority order), the old primary is left behind in a stack of its
+        # own (every other member gets reassigned to the new stack, but the
+        # old primary was never in the new call, so its old stack is never
+        # looked up, merged, or deleted). That leftover single-asset stack
+        # then lingers in clients with local sync caches (e.g. the Immich
+        # mobile app), appearing as a duplicate favorited stack for the same
+        # photo. Skipping redundant re-stacking avoids creating these in the
+        # first place. See plugins/immich/scripts/dedupe_favorite_stacks.py
+        # for cleaning up leftovers created before this guard existed.
+        stack_ids = {asset.get("stack_id") for asset in assets}
+        if len(stack_ids) == 1 and None not in stack_ids:
+            logger.debug("  Assets already stacked together, skipping re-stack")
+            return
+
         # Build priority-ordered list of asset IDs
         ordered_ids = []
 
@@ -1441,6 +1459,7 @@ class ImmichPlugin(IcloudpdPlugin):
                     "asset_id": asset.get("id"),
                     "path": path,
                     "live_photo_video_id": asset.get("livePhotoVideoId"),
+                    "stack_id": (asset.get("stack") or {}).get("id"),
                 }
             )
 
