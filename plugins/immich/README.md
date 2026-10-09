@@ -44,10 +44,17 @@ Look for the `id` field of your external library in the JSON response.
 --immich-process-existing       Process files that already exist on disk, not just newly
                                 downloaded ones. Useful for initial setup or rebuilding albums.
 --immich-stack-media [SIZES]    Stack size variants together. No argument = all sizes; with
-                                argument = comma-separated priority list (first = stack primary).
+                                 argument = comma-separated priority list (first = stack primary).
+                                 Used for videos unless --immich-stack-video is supplied.
+--immich-stack-video [SIZES]    Stack regular video variants independently and override
+                                 --immich-stack-media for videos. If omitted, --immich-stack-media
+                                 applies to videos. No argument = all video sizes; with argument
+                                 = priority list (first = primary).
 --immich-favorite [SIZES]       Mark sizes as favorite in Immich based on iCloud favorite
-                                status. No argument = all sizes; with argument = comma-separated
-                                size list.
+                                 status. No argument = all sizes; with argument = comma-separated
+                                 size list.
+--immich-favorite-video [SIZES] Mark regular video sizes as favorite independently. If omitted,
+                                regular videos use --immich-favorite for compatibility.
 --associate-live-with-extra-sizes [SIZES]
                                 Associate the live photo MOV with additional size variants so
                                 all sizes have live photo playback. No argument = all sizes.
@@ -82,9 +89,13 @@ Stack multiple size variants (original, adjusted, medium) together in Immich.
 ```bash
 --immich-stack-media                    # Stack all downloaded sizes
 --immich-stack-media adjusted,original  # Stack with adjusted as the primary (top of stack)
+--immich-stack-video                    # Stack all downloaded video sizes, original first
+--immich-stack-video original,medium    # Stack videos with original as the primary
 ```
 
-The first size in the list becomes the primary (visible) asset in the stack. Sizes not listed are appended after in their download order.
+The first size in an explicit list becomes the primary (visible) asset in the stack. Sizes not listed are appended after in their download order. Bare `--immich-stack-media` uses the default priority `adjusted,medium,original`, so adjusted is primary when available. Bare `--immich-stack-video` uses `original,adjusted,medium,thumb`, so original is primary when available.
+
+Video stacking overrides the general media setting whenever `--immich-stack-video` is supplied. When it is omitted, regular videos continue to follow `--immich-stack-media` and its priority for compatibility. Live Photo MOV association is unaffected.
 
 > **Note**: Stacks cannot be added to albums. Add individual sizes to albums using `--immich-album`.
 
@@ -98,7 +109,11 @@ Sync iCloud favorites to Immich. The plugin reads the `isFavorite` flag from iCl
 --immich-favorite adjusted              # Mark adjusted size as favorite
 --immich-favorite adjusted,medium       # Mark multiple sizes as favorite
 --immich-favorite                       # Mark all sizes as favorite
+--immich-favorite-video original         # Mark original regular videos as favorite
 ```
+
+`--immich-favorite-video` is opt-in. When omitted, regular videos continue to
+use `--immich-favorite`, preserving the previous behavior.
 
 ---
 
@@ -278,6 +293,56 @@ Fully-empty (0-asset) stacks have no remaining asset to check against
 If duplicates are still visible in the mobile app afterwards, force a full
 resync (log out and back in, or clear local app data) so it drops its stale
 cache of the old stack membership.
+
+### Reorganising Video Stack Primaries
+
+To change the primary of existing video-only stacks, use the standalone
+`plugins/immich/scripts/reorder_video_stack_primary.py` script. It defaults to
+a dry run and identifies sizes from icloudpd filename suffixes. Mixed
+image/video stacks are skipped.
+
+```bash
+# Report video stacks that would be changed to original-primary
+python3 plugins/immich/scripts/reorder_video_stack_primary.py \
+  --server-url https://immich.example.com \
+  --api-key YOUR_API_KEY
+
+# Make original primary
+python3 plugins/immich/scripts/reorder_video_stack_primary.py \
+  --server-url https://immich.example.com \
+  --primary original --apply
+
+# Use another size and restrict processing to one library
+python3 plugins/immich/scripts/reorder_video_stack_primary.py \
+  --server-url https://immich.example.com \
+  --library-id YOUR_LIBRARY_ID --primary medium --apply
+```
+
+The script re-submits every member ID in the new order, so the existing stack
+is merged rather than deleting any video assets. Use `IMMICH_API_KEY` instead
+of `--api-key` if preferred.
+
+### Migrating Video Stack Favorites
+
+Existing stacks can also be migrated so the favorite moves to a selected video
+size. The script only processes video-only stacks with exactly one favorite by
+default; use `--force` to include stacks with multiple favorites. It is a dry
+run unless `--apply` is provided.
+
+```bash
+# Report stacks whose single favorite is currently any size and would move to original
+python3 plugins/immich/scripts/migrate_video_stack_favorites.py \
+  --server-url https://immich.example.com \
+  --target original
+
+# Only migrate adjusted favorites to original
+python3 plugins/immich/scripts/migrate_video_stack_favorites.py \
+  --server-url https://immich.example.com \
+  --source adjusted --target original --apply
+```
+
+The script clears the existing favorite member(s) before favoriting the target
+member. Mixed image/video stacks are ignored.
 
 > **Note**: This is unrelated to Immich's own "Deduplicate" feature
 > (Utilities → Duplicates), which detects duplicate *asset content* via

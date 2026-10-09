@@ -284,9 +284,12 @@ class ImmichPlugin(IcloudpdPlugin):
         # Stacking configuration
         self.stack_media: bool = False
         self.stack_priority: List[str] = ["adjusted", "medium", "original"]
+        self.stack_video: bool = False
+        self.stack_video_priority: List[str] = ["original", "adjusted", "medium", "thumb"]
 
         # Favoriting configuration - now a list of sizes to favorite
         self.favorite_sizes: List[str] = []
+        self.favorite_video_sizes: List[str] = []
 
         # Live photo association configuration
         self.associate_live_sizes: List[str] = []
@@ -295,7 +298,7 @@ class ImmichPlugin(IcloudpdPlugin):
         self.album_rules: List[AlbumRule] = []
 
         # Accumulators for current photo being processed
-        # Each entry: {'status': 'downloaded'|'existed', 'path': str, 'size': str, 'is_live': bool, 'photo_filename': str}
+        # Each entry also records whether the source asset is a regular video.
         self.current_photo_files: List[Dict[str, Any]] = []
 
         # Batch queue for accumulating photos before processing
@@ -318,7 +321,7 @@ class ImmichPlugin(IcloudpdPlugin):
     @property
     def version(self) -> str:
         """Plugin version"""
-        return "2.0.5"
+        return "2.0.6"
 
     @property
     def description(self) -> str:
@@ -363,7 +366,20 @@ class ImmichPlugin(IcloudpdPlugin):
             type=_parse_sizes,
             metavar="SIZE(Primary),SIZE,...",
             help="Stack size variants. No argument stacks all sizes. "
-            "With argument: comma-separated priority list (first=primary)",
+            "With argument: comma-separated priority list (first=primary). "
+            "Used for videos unless --immich-stack-video is supplied.",
+        )
+
+        group.add_argument(
+            "--immich-stack-video",
+            nargs="?",
+            const=None,
+            default=False,
+            type=_parse_sizes,
+            metavar="SIZE(Primary),SIZE,...",
+            help="Stack video variants. No argument stacks all video sizes. "
+            "With argument: comma-separated priority list (first=primary). "
+            "When omitted, videos use --immich-stack-media.",
         )
 
         group.add_argument(
@@ -375,6 +391,18 @@ class ImmichPlugin(IcloudpdPlugin):
             metavar="SIZE,SIZE,...",
             help="Mark sizes as favorite in Immich based on iCloud favorite status. "
             "No argument favorites all sizes. With argument: comma-separated list of sizes",
+        )
+
+        group.add_argument(
+            "--immich-favorite-video",
+            nargs="?",
+            const=None,
+            default=False,
+            type=_parse_sizes,
+            metavar="SIZE,SIZE,...",
+            help="Mark regular video sizes as favorite independently. "
+            "No argument favorites all video sizes; with argument: comma-separated list. "
+            "If omitted, videos use --immich-favorite for compatibility.",
         )
 
         group.add_argument(
@@ -491,6 +519,12 @@ class ImmichPlugin(IcloudpdPlugin):
                 # User provided custom priority list (first=primary)
                 self.stack_priority = stack_arg
 
+        video_stack_arg = getattr(config, "immich_stack_video", False)
+        if video_stack_arg is not False:
+            self.stack_video = True
+            if video_stack_arg is not None and isinstance(video_stack_arg, list):
+                self.stack_video_priority = video_stack_arg
+
         # Parse favorite argument (False, None=all, or list of sizes)
         favorite_arg = getattr(config, "immich_favorite", False)
         if favorite_arg is not False:
@@ -500,6 +534,19 @@ class ImmichPlugin(IcloudpdPlugin):
             elif isinstance(favorite_arg, list):
                 # Favorite specific sizes
                 self.favorite_sizes = favorite_arg
+
+        favorite_video_arg = getattr(config, "immich_favorite_video", False)
+        if favorite_video_arg is not False:
+            if favorite_video_arg is None:
+                self.favorite_video_sizes = [
+                    "original",
+                    "adjusted",
+                    "alternative",
+                    "medium",
+                    "thumb",
+                ]
+            elif isinstance(favorite_video_arg, list):
+                self.favorite_video_sizes = favorite_video_arg
 
         # Parse associate-live argument (False, None=all, or list of sizes)
         associate_arg = getattr(config, "associate_live_with_extra_sizes", False)
@@ -553,13 +600,16 @@ class ImmichPlugin(IcloudpdPlugin):
                 "Choose one: process all existing files OR only existing favorites", file=sys.stderr
             )
             sys.exit(1)
-        if self.process_existing_favorites and not self.favorite_sizes:
+        if self.process_existing_favorites and not (
+            self.favorite_sizes or self.favorite_video_sizes
+        ):
             print(
                 "Warning: --process-existing-favorites is enabled but no favorite sizes configured",
                 file=sys.stderr,
             )
             print(
-                "Add --immich-favorite to specify which sizes to mark as favorites in Immich",
+                "Add --immich-favorite or --immich-favorite-video to specify sizes to mark "
+                "as favorites in Immich",
                 file=sys.stderr,
             )
 
@@ -606,6 +656,10 @@ class ImmichPlugin(IcloudpdPlugin):
             logger.info(f"  Stack Priority:           {', '.join(self.stack_priority)}")
         logger.info(
             f"  Favorite Sizes:           {', '.join(self.favorite_sizes) if self.favorite_sizes else 'None'}"
+        )
+        logger.info(
+            "  Favorite Video Sizes:     "
+            f"{', '.join(self.favorite_video_sizes) if self.favorite_video_sizes else 'compatibility mode'}"
         )
         logger.info(
             f"  Live Association:         {', '.join(self.associate_live_sizes) if self.associate_live_sizes else 'None'}"
@@ -823,6 +877,7 @@ class ImmichPlugin(IcloudpdPlugin):
                     "path": download_path,
                     "size": requested_size.value,
                     "is_live": False,
+                    "is_video": photo.item_type.name == "MOVIE",
                     "photo_filename": photo_filename,
                 }
             )
@@ -847,6 +902,7 @@ class ImmichPlugin(IcloudpdPlugin):
                 "path": download_path,
                 "size": requested_size.value,
                 "is_live": False,
+                "is_video": photo.item_type.name == "MOVIE",
                 "photo_filename": photo_filename,
             }
         )
@@ -1244,14 +1300,18 @@ class ImmichPlugin(IcloudpdPlugin):
     # Post-Processing Functions
     # ========================================================================
 
-    def _process_stacking(self, assets: List[Dict[str, Any]]) -> None:
+    def _process_stacking(
+        self, assets: List[Dict[str, Any]], priority: List[str] | None = None
+    ) -> None:
         """Create stacks for size variants.
 
         Args:
             assets: List of asset dicts with 'size' and 'asset_id' keys
         """
-        if not self.stack_media or len(assets) <= 1:
+        if len(assets) <= 1:
             return
+
+        priority = priority or self.stack_priority
 
         # Skip if every asset already belongs to the same stack. Immich's
         # stack-merge (POST /api/stacks) only deletes a prior stack when that
@@ -1275,7 +1335,7 @@ class ImmichPlugin(IcloudpdPlugin):
         ordered_ids = []
 
         # Add assets in priority order
-        for priority_size in self.stack_priority:
+        for priority_size in priority:
             for asset in assets:
                 if asset["size"] == priority_size and asset["asset_id"] not in ordered_ids:
                     ordered_ids.append(asset["asset_id"])
@@ -1304,10 +1364,19 @@ class ImmichPlugin(IcloudpdPlugin):
             assets: List of asset dicts with 'size' and 'asset_id' keys
             is_favorite: Whether photo is marked favorite in iCloud
         """
-        if not self.favorite_sizes or not is_favorite:
+        if not is_favorite:
             return
 
-        asset_ids = _get_asset_ids_for_sizes(assets, self.favorite_sizes)
+        is_video = bool(assets and assets[0].get("is_video", False))
+        target_sizes = (
+            self.favorite_video_sizes
+            if is_video and self.favorite_video_sizes
+            else self.favorite_sizes
+        )
+        if not target_sizes:
+            return
+
+        asset_ids = _get_asset_ids_for_sizes(assets, target_sizes)
 
         if not asset_ids:
             return
@@ -1460,6 +1529,7 @@ class ImmichPlugin(IcloudpdPlugin):
                     "path": path,
                     "live_photo_video_id": asset.get("livePhotoVideoId"),
                     "stack_id": (asset.get("stack") or {}).get("id"),
+                    "is_video": file_info.get("is_video", False),
                 }
             )
 
@@ -1472,7 +1542,15 @@ class ImmichPlugin(IcloudpdPlugin):
             self._process_favoriting(assets, is_favorite)
         else:
             # Full processing pipeline
-            self._process_stacking(assets)
+            if files[0].get("is_video", False):
+                if self.stack_video:
+                    self._process_stacking(assets, self.stack_video_priority)
+                elif self.stack_media:
+                    # Preserve the pre-video-override behavior: regular videos
+                    # follow image stacking unless video stacking is configured.
+                    self._process_stacking(assets, self.stack_priority)
+            elif self.stack_media:
+                self._process_stacking(assets, self.stack_priority)
             self._process_live_association(assets)
             self._process_favoriting(assets, is_favorite)
             self._process_albums(assets, photo_created, photo_filename)

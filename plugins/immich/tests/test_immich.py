@@ -144,7 +144,10 @@ class TestImmichPluginInit(unittest.TestCase):
         self.assertEqual(plugin.scan_timeout, 5.0)
         self.assertEqual(plugin.poll_interval, 1.0)
         self.assertFalse(plugin.stack_media)
+        self.assertFalse(plugin.stack_video)
+        self.assertEqual(plugin.stack_video_priority, ["original", "adjusted", "medium", "thumb"])
         self.assertEqual(plugin.favorite_sizes, [])
+        self.assertEqual(plugin.favorite_video_sizes, [])
         self.assertEqual(plugin.album_rules, [])
         # Accumulators should be empty
         self.assertEqual(plugin.current_photo_files, [])
@@ -173,7 +176,9 @@ class TestImmichPluginArguments(unittest.TestCase):
         self.assertTrue(hasattr(args, "immich_scan_timeout"))
         self.assertTrue(hasattr(args, "immich_poll_interval"))
         self.assertTrue(hasattr(args, "immich_stack_media"))
+        self.assertTrue(hasattr(args, "immich_stack_video"))
         self.assertTrue(hasattr(args, "immich_favorite"))
+        self.assertTrue(hasattr(args, "immich_favorite_video"))
         self.assertTrue(hasattr(args, "associate_live_with_extra_sizes"))
         self.assertTrue(hasattr(args, "immich_albums"))
 
@@ -192,9 +197,31 @@ class TestImmichPluginArguments(unittest.TestCase):
         self.assertEqual(args.immich_scan_timeout, 5.0)
         self.assertEqual(args.immich_poll_interval, 1.0)
         self.assertFalse(args.immich_stack_media)  # Default is False, not None
+        self.assertFalse(args.immich_stack_video)
         self.assertFalse(args.immich_favorite)  # Default is False, not None
+        self.assertFalse(args.immich_favorite_video)
         self.assertFalse(args.associate_live_with_extra_sizes)  # Default is False
         self.assertIsNone(args.immich_albums)  # append action with no default
+
+    def test_video_stacking_argument(self):
+        parser = ArgumentParser()
+        ImmichPlugin().add_arguments(parser)
+
+        self.assertIsNone(parser.parse_args(["--immich-stack-video"]).immich_stack_video)
+        self.assertEqual(
+            parser.parse_args(["--immich-stack-video", "original,medium"]).immich_stack_video,
+            ["original", "medium"],
+        )
+
+    def test_video_favorite_argument(self):
+        parser = ArgumentParser()
+        ImmichPlugin().add_arguments(parser)
+
+        self.assertIsNone(parser.parse_args(["--immich-favorite-video"]).immich_favorite_video)
+        self.assertEqual(
+            parser.parse_args(["--immich-favorite-video", "original"]).immich_favorite_video,
+            ["original"],
+        )
 
 
 class TestImmichPluginConfiguration(unittest.TestCase):
@@ -212,7 +239,9 @@ class TestImmichPluginConfiguration(unittest.TestCase):
             immich_scan_timeout=5.0,
             immich_poll_interval=1.0,
             immich_stack_media=False,
+            immich_stack_video=False,
             immich_favorite=False,
+            immich_favorite_video=False,
             associate_live_with_extra_sizes=False,
             immich_albums=None,
         )
@@ -238,7 +267,9 @@ class TestImmichPluginConfiguration(unittest.TestCase):
             immich_scan_timeout=5.0,
             immich_poll_interval=1.0,
             immich_stack_media=["adjusted", "original"],
+            immich_stack_video=False,
             immich_favorite=False,
+            immich_favorite_video=False,
             associate_live_with_extra_sizes=False,
             immich_albums=None,
         )
@@ -247,6 +278,31 @@ class TestImmichPluginConfiguration(unittest.TestCase):
 
         self.assertTrue(plugin.stack_media)
         self.assertEqual(plugin.stack_priority, ["adjusted", "original"])
+
+    @patch("plugins.immich.immich.ImmichPlugin._test_immich_connection")
+    def test_configure_video_stacking_with_priority(self, mock_test_conn):
+        plugin = ImmichPlugin()
+        config = Namespace(
+            immich_server_url="http://localhost:2283",
+            immich_api_key="test-key",
+            immich_library_id="lib-123",
+            immich_process_existing=False,
+            immich_scan_timeout=5.0,
+            immich_poll_interval=1.0,
+            immich_stack_media=False,
+            immich_stack_video=["original", "medium"],
+            immich_favorite=False,
+            immich_favorite_video=["original"],
+            associate_live_with_extra_sizes=False,
+            immich_albums=None,
+        )
+
+        plugin.configure(config, None, None)
+
+        self.assertTrue(plugin.stack_video)
+        self.assertEqual(plugin.stack_video_priority, ["original", "medium"])
+
+        self.assertEqual(plugin.favorite_video_sizes, ["original"])
 
     @patch("plugins.immich.immich.ImmichPlugin._test_immich_connection")
     def test_configure_favorite_specific_sizes(self, mock_test_conn):
@@ -719,6 +775,63 @@ class TestImmichPluginStacking(unittest.TestCase):
         self.assertEqual(called_ids[0], "asset-001")
 
     @patch("plugins.immich.immich.ImmichPlugin._create_stack")
+    def test_process_video_stacking_uses_video_priority(self, mock_create_stack):
+        assets = [
+            {"asset_id": "asset-medium", "size": "medium"},
+            {"asset_id": "asset-original", "size": "original"},
+        ]
+
+        self.plugin._process_stacking(assets, ["original", "medium"])
+
+        called_ids = mock_create_stack.call_args[0][0]
+        self.assertEqual(called_ids, ["asset-original", "asset-medium"])
+
+    @patch("plugins.immich.immich.ImmichPlugin._process_albums")
+    @patch("plugins.immich.immich.ImmichPlugin._process_favoriting")
+    @patch("plugins.immich.immich.ImmichPlugin._process_live_association")
+    @patch("plugins.immich.immich.ImmichPlugin._process_stacking")
+    def test_video_stacking_falls_back_to_media_priority(
+        self,
+        mock_process_stacking,
+        mock_process_live_association,
+        mock_process_favoriting,
+        mock_process_albums,
+    ):
+        self.plugin.stack_video = False
+        self.plugin.stack_media = True
+        mock_photo = Mock(spec=PhotoAsset)
+        files = [
+            {
+                "path": "/photos/IMG.MOV",
+                "size": "original",
+                "status": "downloaded",
+                "is_video": True,
+            },
+            {
+                "path": "/photos/IMG-medium.MOV",
+                "size": "medium",
+                "status": "downloaded",
+                "is_video": True,
+            },
+        ]
+        found_assets = {
+            "/photos/IMG.MOV": {"id": "asset-original"},
+            "/photos/IMG-medium.MOV": {"id": "asset-medium"},
+        }
+
+        self.plugin._process_photo_group(
+            files=files,
+            photo_id="photo-1",
+            is_favorite=False,
+            photo_created=None,
+            photo_filename="IMG.MOV",
+            pre_found_assets=found_assets,
+        )
+
+        mock_process_stacking.assert_called_once()
+        self.assertEqual(mock_process_stacking.call_args.args[1], self.plugin.stack_priority)
+
+    @patch("plugins.immich.immich.ImmichPlugin._create_stack")
     def test_process_stacking_skips_if_already_stacked_together(self, mock_create_stack):
         """Assets that already share the same stack must not be re-stacked.
 
@@ -799,6 +912,29 @@ class TestImmichPluginFavorites(unittest.TestCase):
         # Should return early without calling any API
         self.plugin._process_favoriting(assets, is_favorite)
         # No exception should be raised
+
+    @patch("plugins.immich.immich.ImmichPlugin._set_favorite")
+    def test_process_video_favoriting_uses_video_sizes(self, mock_set_favorite):
+        self.plugin.favorite_video_sizes = ["original"]
+        assets = [
+            {"asset_id": "asset-adjusted", "size": "adjusted", "is_video": True},
+            {"asset_id": "asset-original", "size": "original", "is_video": True},
+        ]
+
+        self.plugin._process_favoriting(assets, True)
+
+        mock_set_favorite.assert_called_once_with(["asset-original"], True)
+
+    @patch("plugins.immich.immich.ImmichPlugin._set_favorite")
+    def test_process_video_favoriting_falls_back_to_existing_setting(self, mock_set_favorite):
+        assets = [
+            {"asset_id": "asset-adjusted", "size": "adjusted", "is_video": True},
+            {"asset_id": "asset-original", "size": "original", "is_video": True},
+        ]
+
+        self.plugin._process_favoriting(assets, True)
+
+        mock_set_favorite.assert_called_once_with(["asset-adjusted"], True)
 
 
 class TestImmichPluginProcessExistingFavoritesOnly(unittest.TestCase):
