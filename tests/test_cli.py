@@ -57,6 +57,7 @@ class CliTestCase(TestCase):
         self.assertIn("--password-provider", result)
         self.assertIn("--mfa-provider", result)
         self.assertIn("--size", result)
+        self.assertIn("--size-video", result)
         self.assertIn("--live-photo-size", result)
         self.assertIn("--auth-only", result)
         self.assertIn("--dry-run", result)
@@ -72,6 +73,26 @@ class CliTestCase(TestCase):
             "Expected directory option format not found in help text",
         )
         self.assertIn("Local directory to use for downloads", result)
+
+    def test_video_size_override(self) -> None:
+        _, user_configs, _ = parse(
+            [
+                "--size",
+                "adjusted",
+                "--size-video",
+                "medium",
+                "--size-video",
+                "original",
+                "--username",
+                "u@example.com",
+            ]
+        )
+
+        self.assertEqual(user_configs[0].sizes, [AssetVersionSize.ADJUSTED])
+        self.assertEqual(
+            user_configs[0].video_sizes,
+            [AssetVersionSize.MEDIUM, AssetVersionSize.ORIGINAL],
+        )
 
     def test_cli_parser(self) -> None:
         self.assertEqual.__self__.maxDiff = None  # type: ignore[attr-defined]
@@ -216,6 +237,7 @@ class CliTestCase(TestCase):
                         cookie_directory="~/.pyicloud",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],
+                        video_sizes=None,
                         live_photo_size=LivePhotoVersionSize.ORIGINAL,
                         recent=None,
                         until_found=None,
@@ -260,6 +282,7 @@ class CliTestCase(TestCase):
                         username="u2",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],
+                        video_sizes=None,
                         live_photo_size=LivePhotoVersionSize.ORIGINAL,
                         recent=None,
                         until_found=None,
@@ -342,6 +365,7 @@ class CliTestCase(TestCase):
                         cookie_directory="~/.pyicloud",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],
+                        video_sizes=None,
                         live_photo_size=LivePhotoVersionSize.ORIGINAL,
                         recent=None,
                         until_found=None,
@@ -415,6 +439,7 @@ class CliTestCase(TestCase):
                         cookie_directory="~/.pyicloud",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],
+                        video_sizes=None,
                         live_photo_size=LivePhotoVersionSize.ORIGINAL,
                         recent=None,
                         until_found=None,
@@ -486,6 +511,7 @@ class CliTestCase(TestCase):
                         cookie_directory="~/.pyicloud",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],
+                        video_sizes=None,
                         live_photo_size=LivePhotoVersionSize.ORIGINAL,
                         recent=None,
                         until_found=None,
@@ -560,10 +586,11 @@ class CliTestCase(TestCase):
                 ]
             )
         # Test --process-existing-favorites flag
+        parsed_config = parse(
+            ["--username", "abc", "--process-existing-favorites", "--favorite-to-rating", "5"]
+        )
         self.assertEqual(
-            parse(
-                ["--username", "abc", "--process-existing-favorites", "--favorite-to-rating", "5"]
-            ),
+            parsed_config[:2],
             (
                 GlobalConfig(
                     help=False,
@@ -581,6 +608,7 @@ class CliTestCase(TestCase):
                         PasswordProvider.CONSOLE,
                     ],
                     mfa_provider=MFAProvider.CONSOLE,
+                    plugins=None,
                 ),
                 [
                     UserConfig(
@@ -590,6 +618,7 @@ class CliTestCase(TestCase):
                         cookie_directory="~/.pyicloud",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],
+                        video_sizes=None,
                         live_photo_size=LivePhotoVersionSize.ORIGINAL,
                         recent=None,
                         until_found=None,
@@ -632,8 +661,9 @@ class CliTestCase(TestCase):
             "--process-existing-favorites flag parsing",
         )
         # Test --metadata-overwrite flag
+        metadata_config = parse(["--username", "abc", "--metadata-overwrite"])
         self.assertEqual(
-            parse(["--username", "abc", "--metadata-overwrite"]),
+            metadata_config[:2],
             (
                 GlobalConfig(
                     help=False,
@@ -651,6 +681,7 @@ class CliTestCase(TestCase):
                         PasswordProvider.CONSOLE,
                     ],
                     mfa_provider=MFAProvider.CONSOLE,
+                    plugins=None,
                 ),
                 [
                     UserConfig(
@@ -660,6 +691,7 @@ class CliTestCase(TestCase):
                         cookie_directory="~/.pyicloud",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],
+                        video_sizes=None,
                         live_photo_size=LivePhotoVersionSize.ORIGINAL,
                         recent=None,
                         until_found=None,
@@ -754,10 +786,16 @@ class CliTestCase(TestCase):
                 self.assertIn(text, self._caplog.text)
             for text in not_expected:
                 # Filter out plugin discovery messages which always run at startup
+                plugin_discovery_messages = (
+                    "Found plugins directory",
+                    "Discovering plugins from directory",
+                    "Discovered plugin",
+                    "Skipping entry point",
+                )
                 log_text = "\n".join(
                     line
                     for line in self._caplog.text.split("\n")
-                    if "Discovered plugin" not in line
+                    if not any(message in line for message in plugin_discovery_messages)
                 )
                 self.assertNotIn(text, log_text)
 
@@ -1045,6 +1083,7 @@ class PluginCliTestCase(TestCase):
                         cookie_directory="~/.pyicloud",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],
+                        video_sizes=None,
                         live_photo_size=LivePhotoVersionSize.ORIGINAL,
                         recent=None,
                         until_found=None,

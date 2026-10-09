@@ -18,6 +18,7 @@ class _DefaultConfig:
     auth_only: bool
     cookie_directory: str
     sizes: Sequence[AssetVersionSize]
+    video_sizes: Sequence[AssetVersionSize] | None
     live_photo_size: LivePhotoVersionSize
     recent: int | None
     until_found: int | None

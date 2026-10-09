@@ -13,7 +13,21 @@ Each asset in iCloud may have multiple sizes available for downloading:
 
 Size can be selected with the `--size` parameter and multiple specifications are accepted (e.g., `--size original --size medium`). The default is `original`.
 
-If the size parameter is specified, but it is not available for the asset in iCloud, then `original` is downloaded, unless `--force-size` is specified.
+Regular video sizes can be selected independently with the repeatable
+`--size-video` parameter (currently `original`, `medium`, or `thumb`). When
+`--size-video` is omitted, `--size` continues to control both images and
+regular videos. When it is supplied, `--size` controls images and
+`--size-video` controls regular videos. Live Photo MOVs remain controlled by
+`--live-photo-size`.
+
+The `original` and `medium` video versions are generally available. Individual
+iCloud assets may not provide every requested version.
+
+If a requested image or video size is not available for the asset in iCloud,
+then `original` is downloaded and a warning is logged, unless `--force-size`
+is specified. With `--force-size`, the unavailable requested version is
+skipped and the condition is logged instead; the overall download does not
+fail.
 
 Assets for sizes other than original will have a suffix added to their name, e.g., `IMG-1234-medium.JPG`.
 

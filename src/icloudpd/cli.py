@@ -1,6 +1,7 @@
 import argparse
 import copy
 import datetime
+import logging
 import os
 import pathlib
 import sys
@@ -59,6 +60,16 @@ def add_options_for_user(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
         default=None,
         action="append",
         dest="sizes",
+        type=lower,
+    )
+    cloned.add_argument(
+        "--size-video",
+        help="Video size to download independently of images. Repeatable. If omitted, --size "
+        "controls both images and regular videos. Default: use --size",
+        choices=["original", "medium", "thumb"],
+        default=None,
+        action="append",
+        dest="video_sizes",
         type=lower,
     )
     cloned.add_argument(
@@ -491,6 +502,11 @@ def map_to_config(user_ns: argparse.Namespace) -> UserConfig:
         sizes=list(
             map_(AssetVersionSize, foundation.unique_sequence(user_ns.sizes or ["original"]))
         ),
+        video_sizes=(
+            list(map_(AssetVersionSize, foundation.unique_sequence(user_ns.video_sizes)))
+            if user_ns.video_sizes is not None
+            else None
+        ),
         live_photo_size=LivePhotoVersionSize(user_ns.live_photo_size),
         recent=user_ns.recent,
         until_found=user_ns.until_found,
@@ -541,7 +557,14 @@ def parse(args: Sequence[str]) -> Tuple[GlobalConfig, Sequence[UserConfig], Plug
 
     # Plugin handling
     plugin_manager = PluginManager()
-    plugin_manager.discover()
+    plugin_logger = logging.getLogger("icloudpd.plugins.manager")
+    plugin_logger_was_disabled = plugin_logger.disabled
+    if "--only-print-filenames" in args:
+        plugin_logger.disabled = True
+    try:
+        plugin_manager.discover()
+    finally:
+        plugin_logger.disabled = plugin_logger_was_disabled
 
     if "--plugins-list" in args:
         print("Available plugins:")

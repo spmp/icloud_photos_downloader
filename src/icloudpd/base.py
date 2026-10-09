@@ -446,6 +446,7 @@ def _process_all_users_once(
                     user_config.folder_structure,
                     user_config.directory,
                     user_config.sizes,
+                    user_config.video_sizes,
                     user_config.force_size,
                     global_config.only_print_filenames,
                     user_config.set_exif_datetime,
@@ -638,6 +639,7 @@ def download_builder(
     folder_structure: str,
     directory: str,
     primary_sizes: Sequence[AssetVersionSize],
+    video_sizes: Sequence[AssetVersionSize] | None,
     force_size: bool,
     only_print_filenames: bool,
     set_exif_datetime: bool,
@@ -684,9 +686,15 @@ def download_builder(
             date_path = folder_structure.format(created_date)
 
     try:
+        requested_sizes = (
+            video_sizes
+            if video_sizes is not None and photo.item_type == AssetItemType.MOVIE
+            else primary_sizes
+        )
+
         versions, filename_overrides = disambiguate_filenames(
             photo.versions_with_raw_policy(raw_policy),
-            primary_sizes,
+            requested_sizes,
             photo,
             lp_filename_generator,
             filename_builder(photo),  # Pass base filename with file_match_policy applied
@@ -715,7 +723,7 @@ def download_builder(
         DownloadMediaSkipped()
     )  # Default to skipped for files that aren't downloaded
 
-    for requested_size in primary_sizes:
+    for requested_size in requested_sizes:
         # Keep track of what user requested vs what we actually download (after fallback)
         download_size = requested_size
         if download_size not in versions and download_size != AssetVersionSize.ORIGINAL:
@@ -727,7 +735,12 @@ def download_builder(
                     error_filename,
                 )
                 continue
-            if AssetVersionSize.ORIGINAL in primary_sizes:
+            logger.warning(
+                "%s size does not exist for %s. Falling back to original.",
+                requested_size.value,
+                filename_builder(photo),
+            )
+            if AssetVersionSize.ORIGINAL in requested_sizes:
                 continue  # that should avoid double download for original
             download_size = AssetVersionSize.ORIGINAL
 
