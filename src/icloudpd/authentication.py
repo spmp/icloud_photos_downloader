@@ -104,6 +104,7 @@ def authenticator(
                 return password
         return None
 
+    logger.info("Creating iCloud authentication session")
     auth_result = PyiCloudService.create_pyicloud_service_adt(
         domain=domain,
         apple_id=username,
@@ -112,6 +113,7 @@ def authenticator(
         cookie_directory=cookie_directory,
         client_id=client_id,
     )
+    logger.info("iCloud authentication session response received")
 
     # Handle authentication result and extract service
     match auth_result:

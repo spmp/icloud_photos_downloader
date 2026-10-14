@@ -401,11 +401,13 @@ class PyiCloudService:
 
         login_successful = False
         # Always try to validate token first (it will check if session_token exists internally)
+        LOGGER.info("Validating saved iCloud session")
         validate_result = self._validate_token()
         match validate_result:
             case AuthTokenValid(data):
                 self.data = data
                 login_successful = True
+                LOGGER.info("Saved iCloud session is valid")
             case ResponseServiceUnavailable(reason):
                 # If it's a 503 error, we should return it immediately
                 return AuthServiceUnavailable(reason)
@@ -415,6 +417,7 @@ class PyiCloudService:
                 return AuthRequires2SA(account_name)
 
         if not login_successful:
+            LOGGER.info("Saved iCloud session is unavailable; starting credential login")
             password = self.password_provider()
             if not password:
                 LOGGER.debug("Password Provider did not give any data")
@@ -424,6 +427,7 @@ class PyiCloudService:
             LOGGER.addFilter(self.password_filter)
 
             LOGGER.debug(f"Authenticating as {self.apple_id}")
+            LOGGER.info("Starting iCloud credential verification")
             srp_result = self._authenticate_srp(password)
             match srp_result:
                 case AuthSRPSuccess():
@@ -449,6 +453,7 @@ class PyiCloudService:
             #         LOGGER.error("Failed to login with raw password. Error: %s", error)
             #         raise error
 
+            LOGGER.info("Credential verification succeeded; establishing iCloud session")
             token_result = self._authenticate_with_token()
             match token_result:
                 case AuthWithTokenSuccess(data):
