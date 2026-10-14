@@ -77,7 +77,9 @@ def test_indexing_terminal_state_does_not_wait(monkeypatch) -> None:
     )
 
     assert isinstance(result, PhotoLibraryNotFinishedIndexing)
-    assert "progress=100" in result.reason
+    assert result.reason == (
+        "Apple returned an unexpected indexing state. The Photos library could not be initialized."
+    )
     sleep.assert_not_called()
 
 

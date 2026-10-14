@@ -1245,7 +1245,7 @@ class PyiCloudService:
     def get_photos_service(self) -> "PhotosServiceAccessResult":
         """Get Photos service, returns ADT result."""
         if not self._photos:
-            LOGGER.debug("Authentication complete; initializing iCloud Photos service")
+            LOGGER.info("Preparing iCloud Photos...")
             # Import here to avoid circular import
             from pyicloud_ipd.response_types import (
                 PhotosServiceAccessSuccess,

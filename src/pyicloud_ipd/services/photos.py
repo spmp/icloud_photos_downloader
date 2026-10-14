@@ -413,12 +413,7 @@ class PhotoLibrary:
 
         while True:
             attempt += 1
-            logger.debug(
-                "Checking iCloud photo indexing (zone=%s, library_type=%s, attempt=%d)",
-                zone_name,
-                library_type,
-                attempt,
-            )
+            logger.info("Checking whether your iCloud Photos library is ready...")
             request_started = time.monotonic()
             request = session.post(url, data=json_data, headers={"Content-type": "text/plain"})
             logger.debug(
@@ -445,10 +440,13 @@ class PhotoLibrary:
             records = response.get("records") or []
             if not records:
                 reason = (
-                    "Apple iCloud Photo Library returned no indexing record "
-                    f"(zone={zone_name!r}, library_type={library_type!r})."
+                    "Apple returned no indexing information. Check that iCloud Photos "
+                    "is enabled and that the correct domain is configured."
                 )
                 logger.error(reason)
+                logger.debug(
+                    "No indexing record (zone=%s, library_type=%s)", zone_name, library_type
+                )
                 return PhotoLibraryNotFinishedIndexing(reason)
 
             fields = records[0].get("fields") or {}
@@ -466,8 +464,8 @@ class PhotoLibrary:
                 indexing_progress,
                 index_job_id,
             )
-
             if indexing_state == "FINISHED":
+                logger.info("Your iCloud Photos library is ready. Continuing...")
                 break
 
             diagnostics = (
@@ -477,27 +475,30 @@ class PhotoLibrary:
             )
             if indexing_progress == 100:
                 reason = (
-                    "Apple iCloud Photo Library reported indexing progress=100 but "
-                    f"state is not 'FINISHED' ({diagnostics})."
+                    "Apple returned an unexpected indexing state. "
+                    "The Photos library could not be initialized."
                 )
                 logger.error(reason)
+                logger.debug("Unexpected indexing state (%s)", diagnostics)
                 return PhotoLibraryNotFinishedIndexing(reason)
 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 reason = (
-                    "Apple iCloud Photo Library has not finished indexing yet "
-                    f"after {timeout:.0f}s ({diagnostics})."
+                    "Apple has not finished preparing your iCloud Photos library "
+                    f"after {timeout:.0f} seconds."
                 )
                 logger.error(reason)
+                logger.debug("Indexing timeout diagnostics (%s)", diagnostics)
                 return PhotoLibraryNotFinishedIndexing(reason)
 
             sleep_for = min(delay, remaining)
-            logger.debug(
-                "Apple iCloud Photo Library is still indexing (%s); retrying in %.0fs",
-                diagnostics,
+            logger.info(
+                "Apple is still preparing your iCloud Photos library. "
+                "Waiting %.0f seconds before checking again...",
                 sleep_for,
             )
+            logger.debug("Retrying photo indexing check (%s)", diagnostics)
             time.sleep(sleep_for)
             delay = min(delay * 2, _INDEXING_POLL_MAX)
 
@@ -734,7 +735,7 @@ class PhotosService(PhotoLibrary):
         service_endpoint = self.get_service_endpoint(library_type)
         url = f"{service_endpoint}/zones/list"
 
-        logger.debug("Discovering iCloud photo zones (library_type=%s)", library_type)
+        logger.info("Loading your iCloud Photos libraries...")
         request = self.session.post(url, data="{}", headers={"Content-type": "text/plain"})
         result = self.session.evaluate_response(request)
         match result:
