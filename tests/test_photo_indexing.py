@@ -83,6 +83,26 @@ def test_indexing_terminal_state_does_not_wait(monkeypatch) -> None:
     sleep.assert_not_called()
 
 
+def test_ignore_index_state_proceeds_without_waiting(monkeypatch) -> None:
+    session = make_session([indexing_response("RUNNING", 0)])
+    monkeypatch.setenv("ICLOUDPD_INDEXING_TIMEOUT", "300")
+    sleep = Mock()
+    monkeypatch.setattr(photos.time, "sleep", sleep)
+
+    result = photos.PhotoLibrary.check_and_create(
+        "https://example.test",
+        {},
+        session,
+        {"zoneName": "PrimarySync"},
+        "private",
+        ignore_index_state=True,
+    )
+
+    assert isinstance(result, PhotoLibraryInitSuccess)
+    assert session.post.call_count == 1
+    sleep.assert_not_called()
+
+
 def test_invalid_timeout_falls_back_to_default(monkeypatch) -> None:
     monkeypatch.setenv("ICLOUDPD_INDEXING_TIMEOUT", "nan")
 

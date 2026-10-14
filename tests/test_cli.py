@@ -94,6 +94,11 @@ class CliTestCase(TestCase):
             [AssetVersionSize.MEDIUM, AssetVersionSize.ORIGINAL],
         )
 
+    def test_ignore_index_state(self) -> None:
+        _, user_configs, _ = parse(["--ignore-index-state", "--username", "u@example.com"])
+
+        self.assertTrue(user_configs[0].ignore_index_state)
+
     def test_cli_parser(self) -> None:
         self.assertEqual.__self__.maxDiff = None  # type: ignore[attr-defined]
         global_config, user_configs, _ = parse(["--help"])
@@ -234,6 +239,7 @@ class CliTestCase(TestCase):
                         directory="abc",
                         username="u1",
                         auth_only=False,
+                        ignore_index_state=False,
                         cookie_directory="~/.pyicloud",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],
@@ -278,6 +284,7 @@ class CliTestCase(TestCase):
                     UserConfig(
                         directory="def",
                         auth_only=False,
+                        ignore_index_state=False,
                         cookie_directory="~/.pyicloud",
                         username="u2",
                         password=None,
@@ -362,6 +369,7 @@ class CliTestCase(TestCase):
                         directory="abc",
                         username="u1",
                         auth_only=False,
+                        ignore_index_state=False,
                         cookie_directory="~/.pyicloud",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],
@@ -436,6 +444,7 @@ class CliTestCase(TestCase):
                         directory=None,
                         username="abc",
                         auth_only=False,
+                        ignore_index_state=False,
                         cookie_directory="~/.pyicloud",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],
@@ -508,6 +517,7 @@ class CliTestCase(TestCase):
                         directory=None,
                         username="abc",
                         auth_only=False,
+                        ignore_index_state=False,
                         cookie_directory="~/.pyicloud",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],
@@ -615,6 +625,7 @@ class CliTestCase(TestCase):
                         directory=None,
                         username="abc",
                         auth_only=False,
+                        ignore_index_state=False,
                         cookie_directory="~/.pyicloud",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],
@@ -688,6 +699,7 @@ class CliTestCase(TestCase):
                         directory=None,
                         username="abc",
                         auth_only=False,
+                        ignore_index_state=False,
                         cookie_directory="~/.pyicloud",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],
@@ -1080,6 +1092,7 @@ class PluginCliTestCase(TestCase):
                         directory="test_dir",
                         username="test@example.com",
                         auth_only=False,
+                        ignore_index_state=False,
                         cookie_directory="~/.pyicloud",
                         password=None,
                         sizes=[AssetVersionSize.ORIGINAL],

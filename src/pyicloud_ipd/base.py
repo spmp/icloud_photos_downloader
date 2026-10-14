@@ -135,6 +135,7 @@ class PyiCloudService:
         client_id: str | None = None,
         with_family: bool = True,
         http_timeout: float = 30.0,
+        ignore_index_state: bool = False,
     ) -> ServiceCreationResult:
         """Create PyiCloudService and authenticate, returning ADT result."""
         try:
@@ -148,6 +149,7 @@ class PyiCloudService:
                 client_id=client_id,
                 with_family=with_family,
                 http_timeout=http_timeout,
+                ignore_index_state=ignore_index_state,
             )
             result = service.authenticate_adt()
             # Transform the result to include service where appropriate
@@ -190,6 +192,7 @@ class PyiCloudService:
         client_id: str | None = None,
         with_family: bool = True,
         http_timeout: float = 30.0,
+        ignore_index_state: bool = False,
     ):
         self.apple_id = apple_id
         self.password_provider: Callable[[], str | None] = password_provider
@@ -198,6 +201,7 @@ class PyiCloudService:
         self.client_id: str = client_id or (f"auth-{str(uuid1()).lower()}")
         self.with_family = with_family
         self.http_timeout = http_timeout
+        self.ignore_index_state = ignore_index_state
         self.response_observer = response_observer
         self.observer_rules: Sequence[Rule] = []
 
@@ -1261,7 +1265,7 @@ class PyiCloudService:
                     LOGGER.debug("iCloud Photos webservice URL is available")
                     # Use the class method to check and create
                     result = PhotosService.check_and_create_photos_service(
-                        service_root, self.session, self.params
+                        service_root, self.session, self.params, self.ignore_index_state
                     )
 
                     match result:

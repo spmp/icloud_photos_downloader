@@ -1171,6 +1171,7 @@ def core_single_run(
             partial(append_response, captured_responses),
             user_config.cookie_directory,
             os.environ.get("CLIENT_ID"),
+            ignore_index_state=user_config.ignore_index_state,
         )
 
         # Handle authentication result

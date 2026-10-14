@@ -16,6 +16,7 @@ from pyicloud_ipd.version_size import AssetVersionSize, LivePhotoVersionSize
 class _DefaultConfig:
     directory: str
     auth_only: bool
+    ignore_index_state: bool
     cookie_directory: str
     sizes: Sequence[AssetVersionSize]
     video_sizes: Sequence[AssetVersionSize] | None

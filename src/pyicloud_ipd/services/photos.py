@@ -380,12 +380,14 @@ class PhotoLibrary:
         session: PyiCloudSession,
         zone_id: Dict[str, Any],
         library_type: str,
+        ignore_index_state: bool = False,
     ):
         self.service_endpoint = service_endpoint
         self.params = params
         self.session = session
         self.zone_id = zone_id
         self.library_type = library_type
+        self.ignore_index_state = ignore_index_state
 
     @classmethod
     def check_and_create(
@@ -395,6 +397,7 @@ class PhotoLibrary:
         session: PyiCloudSession,
         zone_id: Dict[str, Any],
         library_type: str,
+        ignore_index_state: bool = False,
     ) -> PhotoLibraryInitResult:
         """Check indexing state and create PhotoLibrary if successful."""
         url = f"{service_endpoint}/records/query?{urlencode(params)}"
@@ -473,6 +476,14 @@ class PhotoLibrary:
                 f"state={indexing_state!r}, progress={indexing_progress!r}, "
                 f"index_job_id={index_job_id!r}"
             )
+            if ignore_index_state:
+                logger.warning(
+                    "Proceeding while Apple is still preparing your iCloud Photos library. "
+                    "Recent changes may not be included."
+                )
+                logger.debug("Ignoring non-finished indexing state (%s)", diagnostics)
+                break
+
             if indexing_progress == 100:
                 reason = (
                     "Apple returned an unexpected indexing state. "
@@ -633,10 +644,17 @@ class PhotosService(PhotoLibrary):
     This also acts as a way to access the user's primary library.
     """
 
-    def __init__(self, service_root: str, session: PyiCloudSession, params: Dict[str, Any]):
+    def __init__(
+        self,
+        service_root: str,
+        session: PyiCloudSession,
+        params: Dict[str, Any],
+        ignore_index_state: bool = False,
+    ):
         self.session = session
         self.params = dict(params)
         self._service_root = service_root
+        self.ignore_index_state = ignore_index_state
 
         self._private_libraries: Dict[str, PhotoLibrary] | None = None
         self._shared_libraries: Dict[str, PhotoLibrary] | None = None
@@ -650,7 +668,11 @@ class PhotosService(PhotoLibrary):
 
     @classmethod
     def check_and_create_photos_service(
-        cls, service_root: str, session: PyiCloudSession, params: Dict[str, Any]
+        cls,
+        service_root: str,
+        session: PyiCloudSession,
+        params: Dict[str, Any],
+        ignore_index_state: bool = False,
     ) -> PhotosServiceInitResult:
         """Check indexing state and create PhotosService if successful."""
         # Create temporary service to get endpoint
@@ -668,13 +690,14 @@ class PhotosService(PhotoLibrary):
             session=session,
             zone_id=zone_id,
             library_type="private",
+            ignore_index_state=ignore_index_state,
         )
 
         # If successful, replace the library with PhotosService instance
         match result:
             case PhotoLibraryInitSuccess(_):
                 # Create the actual PhotosService
-                photos_service = cls(service_root, session, params)
+                photos_service = cls(service_root, session, params, ignore_index_state)
                 return PhotosServiceInitSuccess(photos_service)
             case PhotoLibraryNotFinishedIndexing(reason):
                 return PhotoLibraryNotFinishedIndexing(reason)
@@ -771,6 +794,7 @@ class PhotosService(PhotoLibrary):
                     self.session,
                     zone_id=zone["zoneID"],
                     library_type=library_type,
+                    ignore_index_state=self.ignore_index_state,
                 )
                 match lib_result:
                     case PhotoLibraryInitSuccess(library):

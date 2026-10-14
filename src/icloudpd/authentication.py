@@ -90,6 +90,7 @@ def authenticator(
     response_observer: Callable[[Mapping[str, Any]], None] | None = None,
     cookie_directory: str | None = None,
     client_id: str | None = None,
+    ignore_index_state: bool = False,
 ) -> AuthenticatorResult:
     """Authenticate with iCloud username and password"""
     logger.debug("Authenticating...")
@@ -112,6 +113,7 @@ def authenticator(
         response_observer=response_observer,
         cookie_directory=cookie_directory,
         client_id=client_id,
+        ignore_index_state=ignore_index_state,
     )
     logger.debug("iCloud authentication session response received")
     logger.debug("Authentication result: %s", type(auth_result).__name__)
