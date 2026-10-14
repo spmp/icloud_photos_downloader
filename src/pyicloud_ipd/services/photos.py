@@ -413,7 +413,7 @@ class PhotoLibrary:
 
         while True:
             attempt += 1
-            logger.info(
+            logger.debug(
                 "Checking iCloud photo indexing (zone=%s, library_type=%s, attempt=%d)",
                 zone_name,
                 library_type,
@@ -493,7 +493,7 @@ class PhotoLibrary:
                 return PhotoLibraryNotFinishedIndexing(reason)
 
             sleep_for = min(delay, remaining)
-            logger.info(
+            logger.debug(
                 "Apple iCloud Photo Library is still indexing (%s); retrying in %.0fs",
                 diagnostics,
                 sleep_for,
@@ -734,7 +734,7 @@ class PhotosService(PhotoLibrary):
         service_endpoint = self.get_service_endpoint(library_type)
         url = f"{service_endpoint}/zones/list"
 
-        logger.info("Discovering iCloud photo zones (library_type=%s)", library_type)
+        logger.debug("Discovering iCloud photo zones (library_type=%s)", library_type)
         request = self.session.post(url, data="{}", headers={"Content-type": "text/plain"})
         result = self.session.evaluate_response(request)
         match result:
@@ -749,7 +749,7 @@ class PhotosService(PhotoLibrary):
                 return result
 
         response = request.json()
-        logger.info(
+        logger.debug(
             "Discovered iCloud photo zones (library_type=%s, count=%d)",
             library_type,
             len(response.get("zones") or []),
@@ -757,7 +757,7 @@ class PhotosService(PhotoLibrary):
         for zone in response["zones"]:
             if not zone.get("deleted"):
                 zone_name = zone["zoneID"]["zoneName"]
-                logger.info(
+                logger.debug(
                     "Initializing iCloud photo zone (library_type=%s, zone=%s)",
                     library_type,
                     zone_name,

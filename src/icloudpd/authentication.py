@@ -104,7 +104,7 @@ def authenticator(
                 return password
         return None
 
-    logger.info("Creating iCloud authentication session")
+    logger.debug("Creating iCloud authentication session")
     auth_result = PyiCloudService.create_pyicloud_service_adt(
         domain=domain,
         apple_id=username,
@@ -113,8 +113,8 @@ def authenticator(
         cookie_directory=cookie_directory,
         client_id=client_id,
     )
-    logger.info("iCloud authentication session response received")
-    logger.info("Authentication result: %s", type(auth_result).__name__)
+    logger.debug("iCloud authentication session response received")
+    logger.debug("Authentication result: %s", type(auth_result).__name__)
 
     # Handle authentication result and extract service
     match auth_result:
@@ -152,7 +152,7 @@ def authenticator(
             _, writer = _pair
             writer(username, valid_password[0])
 
-    logger.info(
+    logger.debug(
         "Checking authentication trust state (trusted=%s, requires_2fa=%s, requires_2sa=%s)",
         icloud.is_trusted_session,
         icloud.requires_2fa,
@@ -184,6 +184,7 @@ def authenticator(
                 # For 2SA, need to exit with code 1 for backward compatibility
                 return AuthenticatorTwoSAExit()
 
+    logger.debug("Authentication complete; continuing to Photos setup")
     return AuthenticatorSuccess(icloud)
 
 

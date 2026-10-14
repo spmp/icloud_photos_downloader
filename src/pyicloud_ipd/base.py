@@ -401,13 +401,13 @@ class PyiCloudService:
 
         login_successful = False
         # Always try to validate token first (it will check if session_token exists internally)
-        LOGGER.info("Validating saved iCloud session")
+        LOGGER.debug("Validating saved iCloud session")
         validate_result = self._validate_token()
         match validate_result:
             case AuthTokenValid(data):
                 self.data = data
                 login_successful = True
-                LOGGER.info("Saved iCloud session is valid")
+                LOGGER.debug("Saved iCloud session is valid")
             case ResponseServiceUnavailable(reason):
                 # If it's a 503 error, we should return it immediately
                 return AuthServiceUnavailable(reason)
@@ -417,7 +417,7 @@ class PyiCloudService:
                 return AuthRequires2SA(account_name)
 
         if not login_successful:
-            LOGGER.info("Saved iCloud session is unavailable; starting credential login")
+            LOGGER.debug("Saved iCloud session is unavailable; starting credential login")
             password = self.password_provider()
             if not password:
                 LOGGER.debug("Password Provider did not give any data")
@@ -427,7 +427,7 @@ class PyiCloudService:
             LOGGER.addFilter(self.password_filter)
 
             LOGGER.debug(f"Authenticating as {self.apple_id}")
-            LOGGER.info("Starting iCloud credential verification")
+            LOGGER.debug("Starting iCloud credential verification")
             srp_result = self._authenticate_srp(password)
             match srp_result:
                 case AuthSRPSuccess():
@@ -453,7 +453,7 @@ class PyiCloudService:
             #         LOGGER.error("Failed to login with raw password. Error: %s", error)
             #         raise error
 
-            LOGGER.info("Credential verification succeeded; establishing iCloud session")
+            LOGGER.debug("Credential verification succeeded; establishing iCloud session")
             token_result = self._authenticate_with_token()
             match token_result:
                 case AuthWithTokenSuccess(data):
@@ -1245,6 +1245,7 @@ class PyiCloudService:
     def get_photos_service(self) -> "PhotosServiceAccessResult":
         """Get Photos service, returns ADT result."""
         if not self._photos:
+            LOGGER.debug("Authentication complete; initializing iCloud Photos service")
             # Import here to avoid circular import
             from pyicloud_ipd.response_types import (
                 PhotosServiceAccessSuccess,
@@ -1257,6 +1258,7 @@ class PyiCloudService:
             url_result = self._get_webservice_url("ckdatabasews")
             match url_result:
                 case WebserviceURLSuccess(service_root):
+                    LOGGER.debug("iCloud Photos webservice URL is available")
                     # Use the class method to check and create
                     result = PhotosService.check_and_create_photos_service(
                         service_root, self.session, self.params
@@ -1265,6 +1267,7 @@ class PyiCloudService:
                     match result:
                         case PhotosServiceInitSuccess(service):
                             self._photos = service
+                            LOGGER.debug("iCloud Photos service initialized")
                         case _:
                             # Propagate error ADTs
                             return result
