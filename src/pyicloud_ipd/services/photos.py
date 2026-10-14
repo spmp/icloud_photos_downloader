@@ -413,7 +413,22 @@ class PhotoLibrary:
 
         while True:
             attempt += 1
+            logger.info(
+                "Checking iCloud photo indexing (zone=%s, library_type=%s, attempt=%d)",
+                zone_name,
+                library_type,
+                attempt,
+            )
+            request_started = time.monotonic()
             request = session.post(url, data=json_data, headers={"Content-type": "text/plain"})
+            logger.debug(
+                "iCloud photo indexing response received (zone=%s, library_type=%s, "
+                "attempt=%d, elapsed=%.1fs)",
+                zone_name,
+                library_type,
+                attempt,
+                time.monotonic() - request_started,
+            )
             result = session.evaluate_response(request)
             match result:
                 case ResponseSuccess(resp):
@@ -719,6 +734,7 @@ class PhotosService(PhotoLibrary):
         service_endpoint = self.get_service_endpoint(library_type)
         url = f"{service_endpoint}/zones/list"
 
+        logger.info("Discovering iCloud photo zones (library_type=%s)", library_type)
         request = self.session.post(url, data="{}", headers={"Content-type": "text/plain"})
         result = self.session.evaluate_response(request)
         match result:
@@ -733,9 +749,19 @@ class PhotosService(PhotoLibrary):
                 return result
 
         response = request.json()
+        logger.info(
+            "Discovered iCloud photo zones (library_type=%s, count=%d)",
+            library_type,
+            len(response.get("zones") or []),
+        )
         for zone in response["zones"]:
             if not zone.get("deleted"):
                 zone_name = zone["zoneID"]["zoneName"]
+                logger.info(
+                    "Initializing iCloud photo zone (library_type=%s, zone=%s)",
+                    library_type,
+                    zone_name,
+                )
                 service_endpoint = self.get_service_endpoint(library_type)
                 # Use check_and_create to verify indexing state
                 lib_result = PhotoLibrary.check_and_create(

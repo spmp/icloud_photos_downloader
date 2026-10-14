@@ -1220,8 +1220,8 @@ def core_single_run(
             match photos_service_result:
                 case PhotosServiceAccessSuccess(photos_service):
                     pass  # Continue with photos_service
-                case PhotoLibraryNotFinishedIndexing():
-                    return PhotoLibraryNotFinishedIndexing()
+                case PhotoLibraryNotFinishedIndexing(reason):
+                    return PhotoLibraryNotFinishedIndexing(reason)
                 case Response2SARequired(account_name):
                     return Response2SARequired(account_name)
                 case ResponseServiceNotActivated(reason, code):
@@ -1269,8 +1269,8 @@ def core_single_run(
             match photos_service_result:
                 case PhotosServiceAccessSuccess(photos_service):
                     pass  # Continue with photos_service
-                case PhotoLibraryNotFinishedIndexing():
-                    return PhotoLibraryNotFinishedIndexing()
+                case PhotoLibraryNotFinishedIndexing(reason):
+                    return PhotoLibraryNotFinishedIndexing(reason)
                 case Response2SARequired(account_name):
                     return Response2SARequired(account_name)
                 case ResponseServiceNotActivated(reason, code):

@@ -43,7 +43,7 @@ def test_indexing_poll_retries_until_finished(monkeypatch) -> None:
     session = make_session(
         [indexing_response("RUNNING", 0), indexing_response("FINISHED", 100, "job-2")]
     )
-    clock = iter([0.0, 1.0])
+    clock = iter([0.0, 0.0, 1.0, 1.0, 1.0, 2.0])
     monkeypatch.setenv("ICLOUDPD_INDEXING_TIMEOUT", "15")
     monkeypatch.setattr(photos.time, "monotonic", lambda: next(clock))
     sleep = Mock()
