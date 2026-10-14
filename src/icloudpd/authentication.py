@@ -114,6 +114,7 @@ def authenticator(
         client_id=client_id,
     )
     logger.info("iCloud authentication session response received")
+    logger.info("Authentication result: %s", type(auth_result).__name__)
 
     # Handle authentication result and extract service
     match auth_result:
@@ -146,10 +147,17 @@ def authenticator(
 
     if valid_password:
         # save valid password to all providers
+        logger.debug("Persisting validated password to configured password providers")
         for _, _pair in password_providers.items():
             _, writer = _pair
             writer(username, valid_password[0])
 
+    logger.info(
+        "Checking authentication trust state (trusted=%s, requires_2fa=%s, requires_2sa=%s)",
+        icloud.is_trusted_session,
+        icloud.requires_2fa,
+        icloud.requires_2sa,
+    )
     if icloud.requires_2fa:
         logger.info("Two-factor authentication is required (2fa)")
         notificator()
