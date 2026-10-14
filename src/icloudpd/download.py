@@ -148,11 +148,9 @@ def download_media(
     match photos_service_result:
         case PhotosServiceAccessSuccess(photos_service):
             download_result = photo.download(photos_service.session, version.url, current_size)
-        case PhotoLibraryNotFinishedIndexing():
+        case PhotoLibraryNotFinishedIndexing(reason):
             # Photo library is still indexing, return as service error
-            return ResponseServiceNotActivated(
-                "Photo library has not finished indexing", "INDEXING"
-            )
+            return ResponseServiceNotActivated(reason, "INDEXING")
         case (
             Response2SARequired()
             | ResponseServiceNotActivated()

@@ -510,10 +510,10 @@ def _process_all_users_once(
                     error_code = 1
                     # Log the error message like the exception handler would
                     logger.info(reason)
-                case PhotoLibraryNotFinishedIndexing():
+                case PhotoLibraryNotFinishedIndexing(reason):
                     # Special handling for PhotoLibraryNotFinishedIndexing to maintain watch behavior
                     error_code = 1
-                    logger.info("Apple iCloud Photo Library has not finished indexing yet")
+                    logger.info(reason)
                 case _:
                     # Other ADT error results - map to error code 1
                     error_code = 1

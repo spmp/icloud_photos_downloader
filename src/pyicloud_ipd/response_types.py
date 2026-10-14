@@ -303,7 +303,7 @@ class PhotoLibraryInitSuccess:
 class PhotoLibraryNotFinishedIndexing:
     """Photo library has not finished indexing."""
 
-    pass
+    reason: str = "Apple iCloud Photo Library has not finished indexing yet"
 
 
 # Union type for PhotoLibrary initialization results - reuses response evaluation ADTs

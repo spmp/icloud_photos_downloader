@@ -1,7 +1,11 @@
 import base64
 import copy
 import json
+import logging
+import math
+import os
 import re
+import time
 import typing
 from datetime import datetime
 from typing import Any, Callable, Dict, Generator, Sequence, Tuple, cast
@@ -55,6 +59,40 @@ from pyicloud_ipd.response_types import (
 )
 from pyicloud_ipd.session import PyiCloudSession
 from pyicloud_ipd.version_size import AssetVersionSize, LivePhotoVersionSize, VersionSize
+
+
+_INDEXING_TIMEOUT_ENV = "ICLOUDPD_INDEXING_TIMEOUT"
+_DEFAULT_INDEXING_TIMEOUT = 300.0
+_INDEXING_POLL_INITIAL = 5.0
+_INDEXING_POLL_MAX = 30.0
+
+logger = logging.getLogger(__name__)
+
+
+def _indexing_timeout_seconds() -> float:
+    """Return the bounded indexing wait configured by the environment."""
+    raw = os.environ.get(_INDEXING_TIMEOUT_ENV)
+    if raw is None or raw.strip() == "":
+        return _DEFAULT_INDEXING_TIMEOUT
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning(
+            "%s=%r is not a number; using %.0f seconds",
+            _INDEXING_TIMEOUT_ENV,
+            raw,
+            _DEFAULT_INDEXING_TIMEOUT,
+        )
+        return _DEFAULT_INDEXING_TIMEOUT
+    if not math.isfinite(value) or value < 0:
+        logger.warning(
+            "%s=%r must be a finite non-negative number; using %.0f seconds",
+            _INDEXING_TIMEOUT_ENV,
+            raw,
+            _DEFAULT_INDEXING_TIMEOUT,
+        )
+        return _DEFAULT_INDEXING_TIMEOUT
+    return value
 
 
 def apply_file_match_policy(
@@ -367,22 +405,86 @@ class PhotoLibrary:
             }
         )
 
-        request = session.post(url, data=json_data, headers={"Content-type": "text/plain"})
-        result = session.evaluate_response(request)
-        match result:
-            case ResponseSuccess(resp):
-                request = resp
-            case (
-                Response2SARequired(_)
-                | ResponseServiceNotActivated(_, _)
-                | ResponseAPIError(_, _)
-                | ResponseServiceUnavailable(_)
-            ):
-                return result
-        response = request.json()
-        indexing_state = response["records"][0]["fields"]["state"]["value"]
-        if indexing_state != "FINISHED":
-            return PhotoLibraryNotFinishedIndexing()
+        zone_name = zone_id.get("zoneName")
+        timeout = _indexing_timeout_seconds()
+        deadline = time.monotonic() + timeout
+        delay = _INDEXING_POLL_INITIAL
+        attempt = 0
+
+        while True:
+            attempt += 1
+            request = session.post(url, data=json_data, headers={"Content-type": "text/plain"})
+            result = session.evaluate_response(request)
+            match result:
+                case ResponseSuccess(resp):
+                    request = resp
+                case (
+                    Response2SARequired(_)
+                    | ResponseServiceNotActivated(_, _)
+                    | ResponseAPIError(_, _)
+                    | ResponseServiceUnavailable(_)
+                ):
+                    return result
+
+            response = request.json()
+            records = response.get("records") or []
+            if not records:
+                reason = (
+                    "Apple iCloud Photo Library returned no indexing record "
+                    f"(zone={zone_name!r}, library_type={library_type!r})."
+                )
+                logger.error(reason)
+                return PhotoLibraryNotFinishedIndexing(reason)
+
+            fields = records[0].get("fields") or {}
+            indexing_state = (fields.get("state") or {}).get("value")
+            indexing_progress = (fields.get("progress") or {}).get("value")
+            index_job_id = (fields.get("indexJobId") or {}).get("value")
+
+            logger.debug(
+                "Photo indexing check (zone=%s, library_type=%s, attempt=%d, "
+                "state=%r, progress=%r, index_job_id=%r)",
+                zone_name,
+                library_type,
+                attempt,
+                indexing_state,
+                indexing_progress,
+                index_job_id,
+            )
+
+            if indexing_state == "FINISHED":
+                break
+
+            diagnostics = (
+                f"zone={zone_name!r}, library_type={library_type!r}, "
+                f"state={indexing_state!r}, progress={indexing_progress!r}, "
+                f"index_job_id={index_job_id!r}"
+            )
+            if indexing_progress == 100:
+                reason = (
+                    "Apple iCloud Photo Library reported indexing progress=100 but "
+                    f"state is not 'FINISHED' ({diagnostics})."
+                )
+                logger.error(reason)
+                return PhotoLibraryNotFinishedIndexing(reason)
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                reason = (
+                    "Apple iCloud Photo Library has not finished indexing yet "
+                    f"after {timeout:.0f}s ({diagnostics})."
+                )
+                logger.error(reason)
+                return PhotoLibraryNotFinishedIndexing(reason)
+
+            sleep_for = min(delay, remaining)
+            logger.info(
+                "Apple iCloud Photo Library is still indexing (%s); retrying in %.0fs",
+                diagnostics,
+                sleep_for,
+            )
+            time.sleep(sleep_for)
+            delay = min(delay * 2, _INDEXING_POLL_MAX)
 
         # Create and return the library
         library = cls(
@@ -558,8 +660,8 @@ class PhotosService(PhotoLibrary):
                 # Create the actual PhotosService
                 photos_service = cls(service_root, session, params)
                 return PhotosServiceInitSuccess(photos_service)
-            case PhotoLibraryNotFinishedIndexing():
-                return PhotoLibraryNotFinishedIndexing()
+            case PhotoLibraryNotFinishedIndexing(reason):
+                return PhotoLibraryNotFinishedIndexing(reason)
             case (
                 Response2SARequired(_)
                 | ResponseServiceNotActivated(_, _)
@@ -646,8 +748,8 @@ class PhotosService(PhotoLibrary):
                 match lib_result:
                     case PhotoLibraryInitSuccess(library):
                         libraries[zone_name] = library
-                    case PhotoLibraryNotFinishedIndexing():
-                        skipped[zone_name] = "Not finished indexing"
+                    case PhotoLibraryNotFinishedIndexing(reason):
+                        skipped[zone_name] = reason
                     case Response2SARequired(account_name):
                         skipped[zone_name] = f"2SA required: {account_name}"
                     case ResponseServiceNotActivated(reason, _):
